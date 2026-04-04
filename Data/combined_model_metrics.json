@@ -1,0 +1,393 @@
+{
+  "models": [
+    {
+      "model_key": "qwen3.5-2b-Q8_0",
+      "model_name": "Qwen_Qwen3.5-2B-Q8_0.gguf",
+      "weight_size_mb": 1922.1,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 2071.0,
+        "host_total_mb_range": "1998-2582",
+        "context_mb_avg": 44.125,
+        "compute_mb_avg": 115.0,
+        "kv_total_mb_max": 24.0,
+        "peak_rss_mb_max": 2693.34765625
+      },
+      "speed": {
+        "prompt_tps": 35.84,
+        "gen_tps": 7.14,
+        "load_time_avg_ms": 704.995,
+        "load_time_variance_ms": 782.0083536820891,
+        "load_time_range_ms": "190-2586"
+      },
+      "quality": {
+        "perplexity": 1.0315,
+        "bleu_avg": 11.332827182500385,
+        "rouge_l_avg": 16.05311542390194
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    },
+    {
+      "model_key": "llama_1b-Q4_K_M",
+      "model_name": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "weight_size_mb": 770.3,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 836.25,
+        "host_total_mb_range": "802-1076",
+        "context_mb_avg": 22.0,
+        "compute_mb_avg": 60.25,
+        "kv_total_mb_max": 64.0,
+        "peak_rss_mb_max": 1592.41796875
+      },
+      "speed": {
+        "prompt_tps": 105.55,
+        "gen_tps": 22.27,
+        "load_time_avg_ms": 259.84499999999997,
+        "load_time_variance_ms": 302.45308103666497,
+        "load_time_range_ms": "54-988"
+      },
+      "quality": {
+        "perplexity": 1.0329,
+        "bleu_avg": 20.108581487891833,
+        "rouge_l_avg": 25.185185185185187
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    },
+    {
+      "model_key": "llama_1b-Q8_0",
+      "model_name": "Llama-3.2-1B-Instruct-Q8_0.gguf",
+      "weight_size_mb": 1259.9,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 1334.25,
+        "host_total_mb_range": "1300-1574",
+        "context_mb_avg": 22.0,
+        "compute_mb_avg": 60.25,
+        "kv_total_mb_max": 64.0,
+        "peak_rss_mb_max": 1647.44921875
+      },
+      "speed": {
+        "prompt_tps": 66.09,
+        "gen_tps": 13.79,
+        "load_time_avg_ms": 268.12625,
+        "load_time_variance_ms": 169.4399480589341,
+        "load_time_range_ms": "81-576"
+      },
+      "quality": {
+        "perplexity": 1.0336,
+        "bleu_avg": 29.94281045751634,
+        "rouge_l_avg": 35.14098338826193
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    },
+    {
+      "model_key": "gemma-3-4b-Q8_0",
+      "model_name": "google_gemma-3-4b-it-Q8_0.gguf",
+      "weight_size_mb": 3938.9,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 4147.625,
+        "host_total_mb_range": "4065-4726",
+        "context_mb_avg": 93.5,
+        "compute_mb_avg": 122.125,
+        "kv_total_mb_max": 40.0,
+        "peak_rss_mb_max": 4758.8828125
+      },
+      "speed": {
+        "prompt_tps": 22.77,
+        "gen_tps": 4.48,
+        "load_time_avg_ms": 1146.05,
+        "load_time_variance_ms": 1179.3983415526507,
+        "load_time_range_ms": "250-3957"
+      },
+      "quality": {
+        "perplexity": 1.0694,
+        "bleu_avg": 33.207070707070706,
+        "rouge_l_avg": 30.20990391722099
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    },
+    {
+      "model_key": "qwen3.5-2b-Q6_K",
+      "model_name": "Qwen_Qwen3.5-2B-Q6_K.gguf",
+      "weight_size_mb": 1555.2,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 1704.0,
+        "host_total_mb_range": "1631-2215",
+        "context_mb_avg": 44.125,
+        "compute_mb_avg": 115.0,
+        "kv_total_mb_max": 24.0,
+        "peak_rss_mb_max": 2327.02734375
+      },
+      "speed": {
+        "prompt_tps": 31.69,
+        "gen_tps": 9.75,
+        "load_time_avg_ms": 559.3275,
+        "load_time_variance_ms": 318.9605915984875,
+        "load_time_range_ms": "120-1075"
+      },
+      "quality": {
+        "perplexity": 1.0331,
+        "bleu_avg": 14.156314699792961,
+        "rouge_l_avg": 18.78746634429937
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    },
+    {
+      "model_key": "gemma-3-4b-Q6_K",
+      "model_name": "google_gemma-3-4b-it-Q6_K.gguf",
+      "weight_size_mb": 3042.8,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 3251.625,
+        "host_total_mb_range": "3169-3830",
+        "context_mb_avg": 93.5,
+        "compute_mb_avg": 122.125,
+        "kv_total_mb_max": 40.0,
+        "peak_rss_mb_max": 3895.15625
+      },
+      "speed": {
+        "prompt_tps": 12.98,
+        "gen_tps": 5.64,
+        "load_time_avg_ms": 1261.3425,
+        "load_time_variance_ms": 758.904010639215,
+        "load_time_range_ms": "201-2311"
+      },
+      "quality": {
+        "perplexity": 1.0733,
+        "bleu_avg": 33.509003074220466,
+        "rouge_l_avg": 30.38608432595954
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    },
+    {
+      "model_key": "qwen3.5-2b-Q4_K_M",
+      "model_name": "Qwen_Qwen3.5-2B-Q4_K_M.gguf",
+      "weight_size_mb": 1268.2,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 1417.0,
+        "host_total_mb_range": "1344-1928",
+        "context_mb_avg": 44.125,
+        "compute_mb_avg": 115.0,
+        "kv_total_mb_max": 24.0,
+        "peak_rss_mb_max": 2538.39453125
+      },
+      "speed": {
+        "prompt_tps": 45.63,
+        "gen_tps": 11.45,
+        "load_time_avg_ms": 493.2475,
+        "load_time_variance_ms": 440.4934902308027,
+        "load_time_range_ms": "88-1502"
+      },
+      "quality": {
+        "perplexity": 1.0382,
+        "bleu_avg": 14.383597883597883,
+        "rouge_l_avg": 18.463022323573494
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    },
+    {
+      "model_key": "gemma-3-4b-Q4_K_M",
+      "model_name": "google_gemma-3-4b-it-Q4_K_M.gguf",
+      "weight_size_mb": 2374.4,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 2583.625,
+        "host_total_mb_range": "2501-3162",
+        "context_mb_avg": 93.5,
+        "compute_mb_avg": 122.125,
+        "kv_total_mb_max": 40.0,
+        "peak_rss_mb_max": 4650.40234375
+      },
+      "speed": {
+        "prompt_tps": 28.77,
+        "gen_tps": 7.19,
+        "load_time_avg_ms": 1016.09875,
+        "load_time_variance_ms": 1285.8818097481087,
+        "load_time_range_ms": "192-4138"
+      },
+      "quality": {
+        "perplexity": 1.0808,
+        "bleu_avg": 36.5963785318624,
+        "rouge_l_avg": 34.346405228758165
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    },
+    {
+      "model_key": "qwen3.5-2b-Q5_K_M",
+      "model_name": "Qwen_Qwen3.5-2B-Q5_K_M.gguf",
+      "weight_size_mb": 1437.0,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 1586.0,
+        "host_total_mb_range": "1513-2097",
+        "context_mb_avg": 44.125,
+        "compute_mb_avg": 115.0,
+        "kv_total_mb_max": 24.0,
+        "peak_rss_mb_max": 2208.8515625
+      },
+      "speed": {
+        "prompt_tps": 27.31,
+        "gen_tps": 10.03,
+        "load_time_avg_ms": 666.43875,
+        "load_time_variance_ms": 397.58562457619473,
+        "load_time_range_ms": "102-1319"
+      },
+      "quality": {
+        "perplexity": 1.0326,
+        "bleu_avg": 12.507002801120448,
+        "rouge_l_avg": 14.599665259608402
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    },
+    {
+      "model_key": "llama_1b-Q6_K",
+      "model_name": "Llama-3.2-1B-Instruct-Q6_K.gguf",
+      "weight_size_mb": 974.5,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 1049.25,
+        "host_total_mb_range": "1015-1289",
+        "context_mb_avg": 22.0,
+        "compute_mb_avg": 60.25,
+        "kv_total_mb_max": 64.0,
+        "peak_rss_mb_max": 1362.1015625
+      },
+      "speed": {
+        "prompt_tps": 51.83,
+        "gen_tps": 17.47,
+        "load_time_avg_ms": 354.075,
+        "load_time_variance_ms": 205.15596192722677,
+        "load_time_range_ms": "63-686"
+      },
+      "quality": {
+        "perplexity": 1.0345,
+        "bleu_avg": 20.702214452214452,
+        "rouge_l_avg": 24.16151645843523
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    },
+    {
+      "model_key": "llama_1b-Q5_K_M",
+      "model_name": "Llama-3.2-1B-Instruct-Q5_K_M.gguf",
+      "weight_size_mb": 869.3,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 944.25,
+        "host_total_mb_range": "910-1184",
+        "context_mb_avg": 22.0,
+        "compute_mb_avg": 60.25,
+        "kv_total_mb_max": 64.0,
+        "peak_rss_mb_max": 1256.87109375
+      },
+      "speed": {
+        "prompt_tps": 44.47,
+        "gen_tps": 17.79,
+        "load_time_avg_ms": 423.0,
+        "load_time_variance_ms": 271.1135945898482,
+        "load_time_range_ms": "65-912"
+      },
+      "quality": {
+        "perplexity": 1.0349,
+        "bleu_avg": 25.672398589065256,
+        "rouge_l_avg": 29.43060928433269
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    },
+    {
+      "model_key": "gemma-3-4b-Q5_K_M",
+      "model_name": "google_gemma-3-4b-it-Q5_K_M.gguf",
+      "weight_size_mb": 2698.5,
+      "ctx": 512,
+      "threads": 4,
+      "memory": {
+        "host_total_mb_avg": 2907.625,
+        "host_total_mb_range": "2825-3486",
+        "context_mb_avg": 93.5,
+        "compute_mb_avg": 122.125,
+        "kv_total_mb_max": 40.0,
+        "peak_rss_mb_max": 3550.88671875
+      },
+      "speed": {
+        "prompt_tps": 11.36,
+        "gen_tps": 6.03,
+        "load_time_avg_ms": 1384.3075000000001,
+        "load_time_variance_ms": 781.7067459777629,
+        "load_time_range_ms": "205-2640"
+      },
+      "quality": {
+        "perplexity": 1.0698,
+        "bleu_avg": 31.638970348647767,
+        "rouge_l_avg": 29.170094053881716
+      },
+      "cpu": {
+        "avg_cpu_percent": 0,
+        "max_cpu_percent": 0,
+        "sample_count_avg": 0
+      }
+    }
+  ],
+  "metadata": {
+    "total_models": 12,
+    "processed_files": 12,
+    "timestamp": "2026-04-03T19:22:00Z"
+  }
+}

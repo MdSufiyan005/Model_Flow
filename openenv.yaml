@@ -1,0 +1,30 @@
+spec_version: 1
+name: modelflow
+title: ModelFlow LLM Orchestrator
+description: High-fidelity LLM inference and resource management simulation with CPU contention, RAM spikes, and multi-step execution.
+version: 1.1.0
+author: Meta Platforms, Inc.
+type: space
+runtime: fastapi
+app: server.app:app
+port: 8000
+tags:
+  - openenv
+  - modelflow
+  - reinforcement-learning
+  - simulation
+  - llm-ops
+
+tasks:
+  - id: single-load
+    name: Single Load Test
+    description: 18 standard chatbot requests. Tests the agent's ability to handle high throughput of low-complexity requests.
+  - id: multi-load
+    name: Multi Load
+    description: Mixed reasoning and standard requests for all 3 roles. Requires complex RAM packing and eviction strategy.
+  - id: quality-limit
+    name: Quality Limit
+    description: Balanced mix of requests. Tests model-type/role matching and quality-tier performance.
+  - id: ram-pressure
+    name: RAM Pressure
+    description: Heavy reasoning requests during high-spike probability. Tests safety margins and OOM avoidance.
