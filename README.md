@@ -1,11 +1,12 @@
 ---
 title: ModelFlow LLM Orchestrator
-emoji: 🔊
-colorFrom: indigo
+emoji: ⚙️
+colorFrom: purple
 colorTo: blue
 sdk: docker
 pinned: false
 app_port: 8000
+base_path: /web
 ---
 
 https://haider584-modelflow.hf.space
