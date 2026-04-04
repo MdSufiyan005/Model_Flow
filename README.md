@@ -8,11 +8,13 @@ pinned: false
 app_port: 8000
 ---
 
+https://haider584-modelflow.hf.space
+
 # ModelFlow - LLM Infrastructure Orchestrator
 
 ## Environment Description & Motivation
 
-ModelFlow is a high-fidelity OpenEnv simulation designed for real-world LLM inference server management. The motivation behind this environment is to simulate the complexities of managing a constrained GPU-based inference cluster where dynamic memory spikes, quantization tradeoffs, and hardware limits are present. 
+ModelFlow is a high-fidelity OpenEnv simulation designed for real-world LLM inference server management. The motivation behind this environment is to simulate the complexities of managing a constrained CPU-based inference cluster where dynamic memory spikes, quantization tradeoffs, and hardware limits are present. 
 
 An AI agent must act as an infrastructure orchestrator to balance RAM capacity, quantization tiers, model loads, and CPU contention. The goal is to clear an incoming request queue accurately and efficiently while avoiding Out-Of-Memory (OOM) errors and time penalties.
 

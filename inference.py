@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import sys
 from typing import Dict, Optional, List, Tuple
 from dotenv import load_dotenv
 from models import ModelFlowAction, ModelFlowObservation
@@ -24,7 +25,7 @@ if USE_GROQ_ONLY:
     from groq import Groq
     client       = Groq(api_key=GROQ_API_KEY)
     active_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    print("groq")
+    # print("groq", file=sys.stderr)
 else:
     if not API_KEY:
         raise ValueError("OpenAI/HF branch selected but HF_TOKEN/API_KEY is missing")
@@ -219,7 +220,7 @@ def parse_action(response_text: str) -> Dict:
             "evict_quant_type": evict_quant,
         }
     except Exception as e:
-        print(f"[PARSE ERROR]: {e}")
+        # print(f"[PARSE ERROR]: {e}", file=sys.stderr)
         return {"command": "IDLE", "model_id": None, "quant_type": None,
                 "batch_size": 1, "evict_model_id": None, "evict_quant_type": None}
 
@@ -304,17 +305,17 @@ def apply_planning_override(
             else:
                 evict_m, evict_q = get_eviction_target(obs, exclude_model_id=action.model_id)
                 if evict_m:
-                    print(f"[OVERRIDE] LOAD({action.model_id}-{action.quant_type}) blocked: "
-                          f"needs {model_host_mb(obs, action.model_id, action.quant_type)}MB, "
-                          f"free={ram_free(obs)}MB. Converting to EVICT({evict_m}-{evict_q}).")
+                    # print(f"[OVERRIDE] LOAD({action.model_id}-{action.quant_type}) blocked: "
+                    #       f"needs {model_host_mb(obs, action.model_id, action.quant_type)}MB, "
+                    #       f"free={ram_free(obs)}MB. Converting to EVICT({evict_m}-{evict_q}).", file=sys.stderr)
                     action.command = "EVICT"
                     action.model_id = evict_m
                     action.quant_type = evict_q
                     action.batch_size = 0
                 else:
-                    print(f"[OVERRIDE] LOAD({action.model_id}-{action.quant_type}) blocked: "
-                          f"needs {model_host_mb(obs, action.model_id, action.quant_type)}MB, "
-                          f"free={ram_free(obs)}MB. Emitting IDLE.")
+                    # print(f"[OVERRIDE] LOAD({action.model_id}-{action.quant_type}) blocked: "
+                    #       f"needs {model_host_mb(obs, action.model_id, action.quant_type)}MB, "
+                    #       f"free={ram_free(obs)}MB. Emitting IDLE.", file=sys.stderr)
                     action.command = "IDLE"
 
     # ── REPLACE override ──────────────────────────────────────────────────────
@@ -346,8 +347,8 @@ def apply_planning_override(
         if needed_mb > simulated_free:
             evict_m, evict_q = get_eviction_target(obs, exclude_model_id=action.model_id)
             if evict_m:
-                print(f"[OVERRIDE] REPLACE({action.model_id}-{action.quant_type}) blocked: "
-                      f"needs {needed_mb}MB, simulated_free={simulated_free}MB. Converting to EVICT({evict_m}-{evict_q}).")
+                # print(f"[OVERRIDE] REPLACE({action.model_id}-{action.quant_type}) blocked: "
+                #       f"needs {needed_mb}MB, simulated_free={simulated_free}MB. Converting to EVICT({evict_m}-{evict_q}).", file=sys.stderr)
                 action.command = "EVICT"
                 action.model_id = evict_m
                 action.quant_type = evict_q
@@ -355,8 +356,8 @@ def apply_planning_override(
                 action.evict_quant_type = None
                 action.batch_size = 0
             else:
-                print(f"[OVERRIDE] REPLACE({action.model_id}-{action.quant_type}) blocked: "
-                      f"needs {needed_mb}MB, simulated_free={simulated_free}MB. Emitting IDLE.")
+                # print(f"[OVERRIDE] REPLACE({action.model_id}-{action.quant_type}) blocked: "
+                #       f"needs {needed_mb}MB, simulated_free={simulated_free}MB. Emitting IDLE.", file=sys.stderr)
                 action.command = "IDLE"
 
     # ── EXECUTE override ──────────────────────────────────────────────────────
@@ -374,14 +375,14 @@ def apply_planning_override(
         # 5. Nothing to execute for this model?
         model_qs = q_stats.get(action.model_id, {})
         if model_qs.get("total", 0) == 0:
-            print(f"[OVERRIDE] EXECUTE({action.model_id}) blocked: no pending requests.")
+            # print(f"[OVERRIDE] EXECUTE({action.model_id}) blocked: no pending requests.", file=sys.stderr)
             action.command = "IDLE"
             return action
-
+        
         # 4. Tier check — don't let medium quant attempt reasoning again
         if model_qs.get("reasoning", 0) > 0 and not can_serve_reasoning(obs, action.model_id):
-            print(f"[OVERRIDE] EXECUTE({action.model_id}-{action.quant_type}) blocked: "
-                  f"reasoning pending but tier too low.")
+            # print(f"[OVERRIDE] EXECUTE({action.model_id}-{action.quant_type}) blocked: "
+            #       f"reasoning pending but tier too low.", file=sys.stderr)
             action.command = "IDLE"
             return action
 
@@ -402,15 +403,15 @@ def apply_planning_override(
             if total_peak > obs.ram_limit_mb:
                 evict_m, evict_q = get_eviction_target(obs, exclude_model_id=action.model_id)
                 if evict_m:
-                    print(f"[OVERRIDE] EXECUTE({action.model_id}-{action.quant_type}) blocked: "
-                          f"peak {total_peak:.0f}MB > limit {obs.ram_limit_mb}MB. Converting to EVICT({evict_m}-{evict_q}).")
+                    # print(f"[OVERRIDE] EXECUTE({action.model_id}-{action.quant_type}) blocked: "
+                    #       f"peak {total_peak:.0f}MB > limit {obs.ram_limit_mb}MB. Converting to EVICT({evict_m}-{evict_q}).", file=sys.stderr)
                     action.command = "EVICT"
                     action.model_id = evict_m
                     action.quant_type = evict_q
                     action.batch_size = 0
                 else:
-                    print(f"[OVERRIDE] EXECUTE({action.model_id}-{action.quant_type}) blocked: "
-                          f"peak {total_peak:.0f}MB > limit {obs.ram_limit_mb}MB. Emitting IDLE.")
+                    # print(f"[OVERRIDE] EXECUTE({action.model_id}-{action.quant_type}) blocked: "
+                    #       f"peak {total_peak:.0f}MB > limit {obs.ram_limit_mb}MB. Emitting IDLE.", file=sys.stderr)
                     action.command = "IDLE"
 
     # ── EVICT override ────────────────────────────────────────────────────────
@@ -632,8 +633,6 @@ def build_messages(
 # ── Task runner ───────────────────────────────────────────────────────────────
 
 def run_task(task_name: str):
-    print(f"[START] task={task_name} env={BENCHMARK} model={active_model}", flush=True)
-
     env  = ModelFlowEnvironment()
     obs  = env.reset(task_name=task_name)
 
@@ -641,91 +640,98 @@ def run_task(task_name: str):
     rewards             = []
     done                = False
     compressed_history: List[str] = []
+    score               = 0.0
 
-    while not done and step_num < MAX_STEPS_PER_TASK:
-        step_num += 1
+    print(f"[START] task={task_name} env={BENCHMARK} model={active_model}", flush=True)
 
-        # ── Compute derived context ───────────────────────────────────────────
-        q_stats_now   = queue_stats(obs)
-        roster_str    = build_roster_str(obs)
-        system_prompt = get_system_prompt(roster_str, obs.ram_limit_mb, q_stats_now, obs)
-        obs_text      = observation_to_text(obs, q_stats_now)
-        recent        = compressed_history[-CONTEXT_HISTORY_STEPS:]
-        messages      = build_messages(system_prompt, recent, obs_text)
+    try:
+        while not done and step_num < MAX_STEPS_PER_TASK:
+            step_num += 1
 
-        # ── LLM call with retry / backoff ─────────────────────────────────────
-        action_dict = {"command": "IDLE", "model_id": None, "quant_type": None,
-                       "batch_size": 1, "evict_model_id": None, "evict_quant_type": None}
-        for attempt in range(MAX_RETRIES):
-            try:
-                response = client.chat.completions.create(
-                    model=active_model,
-                    messages=messages,
-                    temperature=TEMPERATURE,
-                    max_tokens=MAX_TOKENS,
-                    response_format={"type": "json_object"} if USE_GROQ_ONLY else None,
-                )
-                raw = response.choices[0].message.content.strip()
-                print(f"[LLM RAW]: {raw}")
-                action_dict = parse_action(raw)
-                break
-            except Exception as e:
-                err_str = str(e)
-                wait    = BASE_BACKOFF_S * (2 ** attempt)
-                if any(kw in err_str.lower() for kw in ("rate limit", "429", "too many")) \
-                        and attempt < MAX_RETRIES - 1:
-                    time.sleep(wait)
-                else:
+            # ── Compute derived context ───────────────────────────────────────────
+            q_stats_now   = queue_stats(obs)
+            roster_str    = build_roster_str(obs)
+            system_prompt = get_system_prompt(roster_str, obs.ram_limit_mb, q_stats_now, obs)
+            obs_text      = observation_to_text(obs, q_stats_now)
+            recent        = compressed_history[-CONTEXT_HISTORY_STEPS:]
+            messages      = build_messages(system_prompt, recent, obs_text)
+
+            # ── LLM call with retry / backoff ─────────────────────────────────────
+            action_dict = {"command": "IDLE", "model_id": None, "quant_type": None,
+                           "batch_size": 1, "evict_model_id": None, "evict_quant_type": None}
+            for attempt in range(MAX_RETRIES):
+                try:
+                    response = client.chat.completions.create(
+                        model=active_model,
+                        messages=messages,
+                        temperature=TEMPERATURE,
+                        max_tokens=MAX_TOKENS,
+                        response_format={"type": "json_object"} if USE_GROQ_ONLY else None,
+                    )
+                    raw = response.choices[0].message.content.strip()
+                    # print(f"[LLM RAW]: {raw}", file=sys.stderr)
+                    action_dict = parse_action(raw)
                     break
+                except Exception as e:
+                    err_str = str(e)
+                    wait    = BASE_BACKOFF_S * (2 ** attempt)
+                    if any(kw in err_str.lower() for kw in ("rate limit", "429", "too many")) \
+                            and attempt < MAX_RETRIES - 1:
+                        time.sleep(wait)
+                    else:
+                        break
 
-        # ── Build ModelFlowAction ─────────────────────────────────────────────
-        action = ModelFlowAction(
-            command         = action_dict.get("command", "IDLE"),
-            model_id        = action_dict.get("model_id"),
-            quant_type      = action_dict.get("quant_type"),
-            batch_size      = min(action_dict.get("batch_size", 8), 8),
-            evict_model_id  = action_dict.get("evict_model_id"),
-            evict_quant_type= action_dict.get("evict_quant_type"),
-        )
+            # ── Build ModelFlowAction ─────────────────────────────────────────────
+            action = ModelFlowAction(
+                command         = action_dict.get("command", "IDLE"),
+                model_id        = action_dict.get("model_id"),
+                quant_type      = action_dict.get("quant_type"),
+                batch_size      = min(action_dict.get("batch_size", 8), 8),
+                evict_model_id  = action_dict.get("evict_model_id"),
+                evict_quant_type= action_dict.get("evict_quant_type"),
+            )
 
 
-        # ── Apply planning overrides (all 7 bug fixes) ────────────────────────
-        action = apply_planning_override(action, obs)
+            # ── Apply planning overrides (all 7 bug fixes) ────────────────────────
+            action = apply_planning_override(action, obs)
 
-        # ── Step environment ──────────────────────────────────────────────────
-        obs        = env.step(action)
-        reward_val = round(obs.reward, 2)
-        rewards.append(reward_val)
-        done = obs.done
+            # ── Step environment ──────────────────────────────────────────────────
+            obs        = env.step(action)
+            reward_val = round(obs.reward, 2)
+            rewards.append(reward_val)
+            done = obs.done
 
-        done_str  = "true" if done else "false"
-        error_val = f"'{obs.last_action_error}'" if obs.last_action_error else "null"
-        act_str   = f"{action.command}({action.model_id or ''})"
+            done_str  = "true" if done else "false"
+            error_val = obs.last_action_error if obs.last_action_error else "null"
+            act_str   = f"{action.command}({action.model_id or ''})"
+            print(
+                f"[STEP] step={step_num} action={act_str} reward={reward_val:.2f} "
+                f"done={done_str} error={error_val}",
+                flush=True,
+            )
+
+            compressed_history.append(
+                compress_step(step_num, action, obs.reward,
+                              obs.last_action_feedback, obs.last_action_error)
+            )
+        
+        score = env.score_task()
+    
+    finally:
+        success     = len(obs.queue) == 0
+        success_str = "true" if success else "false"
+        rewards_str = ",".join(f"{r:.2f}" for r in rewards)
         print(
-            f"[STEP] step={step_num} action={act_str} reward={reward_val:.2f} "
-            f"done={done_str} error={error_val}",
+            f"[END] success={success_str} steps={step_num} score={score:.2f} rewards={rewards_str}",
             flush=True,
         )
-
-        compressed_history.append(
-            compress_step(step_num, action, obs.reward,
-                          obs.last_action_feedback, obs.last_action_error)
-        )
-
-    success     = len(obs.queue) == 0
-    score       = env.score_task()
-    success_str = "true" if success else "false"
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(
-        f"[END] success={success_str} steps={step_num} score={score:.3f} rewards={rewards_str}",
-        flush=True,
-    )
 
 
 if __name__ == "__main__":
     for task in TASKS:
         try:
             run_task(task)
-            print("\n" + "=" * 80 + "\n")
+            # print("\n" + "=" * 80 + "\n", file=sys.stderr)
         except Exception as e:
-            print(f"Error running task {task}: {e}")
+            # print(f"Error running task {task}: {e}", file=sys.stderr)
+            pass

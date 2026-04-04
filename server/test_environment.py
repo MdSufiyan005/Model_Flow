@@ -2,6 +2,7 @@ import os
 import math
 import random
 import json
+import sys
 from typing import List, Dict
 
 from groq import Groq
@@ -233,8 +234,8 @@ class ModelFlowEnvironment(Environment):
         self.oom_errors = 0
         self.reasoning_completed = 0
 
-        print(f"[GRADER] Target Task: {task_name} | RAM Limit: {self.HARDWARE_RAM_MB} MB")
-        print(f"\n[GRADER] Target Task: {self.current_task} | Requests: {self._initial_request_count} (Reasoning: {self._initial_reasoning_count})")
+        # print(f"[GRADER] Target Task: {task_name} | RAM Limit: {self.HARDWARE_RAM_MB} MB", file=sys.stderr)
+        # print(f"\n[GRADER] Target Task: {self.current_task} | Requests: {self._initial_request_count} (Reasoning: {self._initial_reasoning_count})", file=sys.stderr)
         return self._get_observation()
 
     def _tick_spike(self):
@@ -291,7 +292,7 @@ class ModelFlowEnvironment(Environment):
                         self.last_error = f"OOM: {key} needs {host_size:.0f}MB, only {effective_free:.0f}MB free"
                         reward -= 30.0
                         self.oom_errors += 1
-                        print(f"[GRADER] OOM Error recorded! Total: {self.oom_errors}")
+                        # print(f"[GRADER] OOM Error recorded! Total: {self.oom_errors}", file=sys.stderr)
                     else:
                         is_warm = key in self.evicted_cache
                         base_load_s = data["load_avg_ms"] / 1000.0
@@ -322,12 +323,12 @@ class ModelFlowEnvironment(Environment):
                         }
                         self.ram_used_mb += host_size
                         self.load_count += 1
-                        print(f"[GRADER] LOAD action: {key} | Total Loads: {self.load_count}")
+                        # print(f"[GRADER] LOAD action: {key} | Total Loads: {self.load_count}", file=sys.stderr)
                         reward -= actual_load_s * 1.5
 
                         if len(self.loaded_models) >= 2:
                             reward += 3.0
-                            print(f"[GRADER] Multi-model Bonus: {len(self.loaded_models)} models co-resident.")
+                            # print(f"[GRADER] Multi-model Bonus: {len(self.loaded_models)} models co-resident.", file=sys.stderr)
 
                         warm_str = " (warm)" if is_warm else " (cold)"
                         self.last_feedback = f"Loaded {key}{warm_str} in {actual_load_s:.1f}s."
@@ -401,7 +402,7 @@ class ModelFlowEnvironment(Environment):
                                 self.completed += 1
                                 if req.reasoning:
                                     self.reasoning_completed += 1
-                                    print(f"[GRADER] Reasoning request completed!")
+                                    # print(f"[GRADER] Reasoning request completed!", file=sys.stderr)
                                 processed_ids.append(req.request_id)
 
                             self.queue = [r for r in self.queue if r.request_id not in processed_ids]
@@ -435,13 +436,13 @@ class ModelFlowEnvironment(Environment):
                 self.ram_used_mb -= data.get("size_mb", 0)
                 self.evicted_cache[key] = self.step_count
                 self.evict_count += 1
-                print(f"[GRADER] EVICT action: {key} | Total Evicts: {self.evict_count}")
+                # print(f"[GRADER] EVICT action: {key} | Total Evicts: {self.evict_count}", file=sys.stderr)
                 reward -= 10.0
 
                 model_name = key.rsplit("-", 1)[0]
                 if not self._is_model_needed(model_name):
                     reward += 5.0
-                    print(f"[GRADER] Clean Eviction Bonus: {model_name} is no longer needed.")
+                    # print(f"[GRADER] Clean Eviction Bonus: {model_name} is no longer needed.", file=sys.stderr)
 
                 self.last_feedback = f"Evicted {key}. Freed {data.get('size_mb', 0)}MB."
             else:
@@ -453,7 +454,7 @@ class ModelFlowEnvironment(Environment):
             reward -= 15.0
             if self.queue:
                 self.idle_steps += 1
-                print(f"[GRADER] IDLE waste recorded. Total: {self.idle_steps}")
+                # print(f"[GRADER] IDLE waste recorded. Total: {self.idle_steps}", file=sys.stderr)
             self.last_feedback = "Idled."
 
         elif action.command == "REPLACE":
