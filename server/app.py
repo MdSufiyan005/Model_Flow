@@ -128,16 +128,22 @@ def _coerce_reset_output(obs: Any, task_name: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------
 @app.get("/", include_in_schema=False)
 async def root():
-    return RedirectResponse(url="/dashboard")
+    return RedirectResponse(url="/web")
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     return HTMLResponse(_read_dashboard_html())
 
-@app.get("/web")
-async def root():
-    return {"message": "ModelFlow Orchestrator is running!"}
+
+@app.get("/web", response_class=HTMLResponse)
+async def web_root():
+    return HTMLResponse(_read_dashboard_html())
+
+
+@app.get("/health",include_in_schema=False)
+async def health():
+    return {"status":"ok"}
 
 @app.get("/state")
 async def get_state():

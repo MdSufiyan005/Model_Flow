@@ -1,9 +1,6 @@
-spec_version: 1
 name: modelflow
 title: ModelFlow LLM Orchestrator
 description: High-fidelity LLM inference and resource management simulation with CPU contention, RAM spikes, and multi-step execution.
-version: 1.1.0
-author: Meta Platforms, Inc.
 type: space
 runtime: fastapi
 app: server.app:app
