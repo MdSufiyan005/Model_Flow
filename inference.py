@@ -443,7 +443,7 @@ def apply_planning_override(
     return action
 
 
-# ── Roster string builder ─────────────────────────────────────────────────────
+#  Roster string builder
 
 def build_roster_str(obs: ModelFlowObservation) -> str:
     lines = ["  MODEL-QUANT          | TIER   | SIZE(MB) | GEN t/s | PROMPT t/s"]
@@ -456,7 +456,6 @@ def build_roster_str(obs: ModelFlowObservation) -> str:
     return "\n".join(lines)
 
 
-# ── FIX 3+7: System prompt with explicit episode-level planning instructions ──
 
 def get_system_prompt(
     roster_str:    str,
@@ -489,18 +488,18 @@ System overhead: {SYSTEM_OVERHEAD_MB} MB (always reserved)
 Effective free:  {free_mb} MB right now
 Currently loaded: {loaded_str}
 
-━━━ ROLE → MODEL MAPPING ━━━
+ROLE → MODEL MAPPING 
   chatbot    → gemma-3-4b
   translator → llama_1b
   coder      → qwen3.5-2b
 
-━━━ QUANT TIERS ━━━
+QUANT TIERS 
   Q4_K_M = low    → standard requests ONLY
   Q5_K_M = medium → standard requests ONLY  ← CANNOT serve reasoning
   Q6_K   = high   → standard + reasoning    ← minimum for reasoning
   Q8_0   = risky  → standard + reasoning
 
-━━━ PLANNING RULES (follow strictly) ━━━
+ PLANNING RULES (follow strictly) 
 1. RAM CHECK FIRST: Before LOAD or REPLACE, verify:
      model_host_mb + current_ram_used + {SYSTEM_OVERHEAD_MB} (overhead) ≤ {ram_limit_mb}
    If it doesn't fit, EVICT something first.
