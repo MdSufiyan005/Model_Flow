@@ -33,6 +33,15 @@ class EpisodeResult:
 
 
 # ---------------------------------------------------------------------------
+# Strict clamp — scores must be strictly between 0 and 1 (exclusive)
+# ---------------------------------------------------------------------------
+
+def _clamp(score: float) -> float:
+    """Clamp score to the open interval (0.001, 0.999)."""
+    return round(min(0.999, max(0.001, score)), 3)
+
+
+# ---------------------------------------------------------------------------
 # Individual graders
 # ---------------------------------------------------------------------------
 
@@ -55,7 +64,7 @@ def grade_multi_load(result: EpisodeResult) -> float:
     efficiency = max(0.0, 1.0 - overage / 18.0)
 
     score = 0.50 * completion + 0.30 * reasoning + 0.20 * efficiency
-    return round(min(1.0, max(0.0, score)), 3)
+    return _clamp(score)
 
 
 def grade_single_load(result: EpisodeResult) -> float:
@@ -74,7 +83,7 @@ def grade_single_load(result: EpisodeResult) -> float:
     stability = max(0.0, 1.0 - (extra_loads + extra_evicts) * 0.15)
 
     score = 0.60 * completion + 0.40 * stability
-    return round(min(1.0, max(0.0, score)), 3)
+    return _clamp(score)
 
 
 def grade_quality_limit(result: EpisodeResult) -> float:
@@ -104,7 +113,7 @@ def grade_quality_limit(result: EpisodeResult) -> float:
     efficiency = step_efficiency * (1.0 - churn_penalty)
 
     score = 0.50 * completion + 0.40 * reasoning + 0.10 * efficiency
-    return round(min(1.0, max(0.0, score)), 3)
+    return _clamp(score)
 
 
 def grade_ram_pressure(result: EpisodeResult) -> float:
@@ -125,7 +134,7 @@ def grade_ram_pressure(result: EpisodeResult) -> float:
     safety = max(0.0, 1.0 - oom_penalty)
 
     score = 0.40 * completion + 0.40 * safety + 0.20 * reasoning
-    return round(min(1.0, max(0.0, score)), 3)
+    return _clamp(score)
 
 
 # ---------------------------------------------------------------------------
@@ -133,24 +142,23 @@ def grade_ram_pressure(result: EpisodeResult) -> float:
 # ---------------------------------------------------------------------------
 
 GRADERS: Dict[str, callable] = {
-    "multi-load":  grade_multi_load,
-    "single-load": grade_single_load,
-    "quality-limit":    grade_quality_limit,
+    "multi-load":    grade_multi_load,
+    "single-load":   grade_single_load,
+    "quality-limit": grade_quality_limit,
     "ram-pressure":  grade_ram_pressure,
 }
 
 
 def grade(task_name: str, result: EpisodeResult) -> float:
     """
-    Main entry point. Returns a score in [0.0, 1.0].
+    Main entry point. Returns a score strictly in (0.001, 0.999).
     """
     prefix = task_name.lower().replace("_", "-")   # standardize task names
     grader = GRADERS.get(prefix)
 
     if grader is None:
         # Emergency fallback (should never be hit in normal use)
-        return round(result.completed_requests / max(1, result.total_requests), 3)
+        raw = result.completed_requests / max(1, result.total_requests)
+        return _clamp(raw)
 
     return grader(result)
-
-    
