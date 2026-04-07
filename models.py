@@ -5,16 +5,6 @@ Command = Literal["LOAD", "EXECUTE", "EVICT", "IDLE", "REPLACE"]
 Complexity = Literal["standard", "reasoning"]
 
 
-# class ModelFlowAction(BaseModel):
-#     command: Command
-#     model_id: Optional[str] = None
-#     quant_type: Optional[str] = None
-#     batch_size: int = Field(default=8, ge=1, le=8)
-
-#     # For REPLACE: the model to evict
-#     evict_model_id: Optional[str] = None
-#     evict_quant_type: Optional[str] = None
-
 class ModelFlowAction(BaseModel):
     command: Command
     model_id: Optional[str] = None

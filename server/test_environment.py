@@ -12,7 +12,7 @@ from models import ModelFlowObservation, RequestInfo, ModelFlowAction
 # ── Constants ────────────────────────────────────────────────────────────────
 
 ACTIVE_MODELS = {"qwen3.5-2b", "llama_1b", "gemma-3-4b"}
-CANONICAL_QUANTS = {"Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"}
+QUANTS = {"Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"}
 
 # Quant name → tier label
 QUANT_TO_TIER: Dict[str, str] = {
@@ -71,7 +71,7 @@ class ModelFlowEnvironment(Environment):
                 model_name = parts[0]
                 quant_type = parts[1]
 
-                if model_name in ACTIVE_MODELS and quant_type in CANONICAL_QUANTS:
+                if model_name in ACTIVE_MODELS and quant_type in QUANTS:
                     self.roster[m["model_key"]] = {
                         "model": model_name,
                         "quant": quant_type,

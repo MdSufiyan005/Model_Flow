@@ -11,9 +11,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-# ---------------------------------------------------------------------
 # Robust path handling
-# ---------------------------------------------------------------------
+
 ROOT = Path(__file__).resolve().parent
 if ROOT.name == "server":
     ROOT = ROOT.parent
@@ -27,9 +26,8 @@ if str(ROOT) not in sys.path:
 from models import ModelFlowAction, ModelFlowObservation
 from server.test_environment import ModelFlowEnvironment
 
-# ---------------------------------------------------------------------
 # App setup
-# ---------------------------------------------------------------------
+
 app = FastAPI(
     title="ModelFlow",
     description="FastAPI environment server for ModelFlow",
@@ -44,9 +42,8 @@ app.mount("/scripts", StaticFiles(directory=str(SCRIPTS_PATH)), name="scripts")
 singleton_env = ModelFlowEnvironment()
 
 
-# ---------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------
+
 def _to_jsonable(obj: Any) -> Any:
     return jsonable_encoder(obj, by_alias=True)
 
@@ -123,9 +120,7 @@ def _coerce_reset_output(obs: Any, task_name: str) -> Dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------
 # Routes
-# ---------------------------------------------------------------------
 @app.get("/", include_in_schema=False)
 async def root():
     return RedirectResponse(url="/web")
