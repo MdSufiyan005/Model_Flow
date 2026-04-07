@@ -27,7 +27,6 @@ from models import ModelFlowAction, ModelFlowObservation
 from server.test_environment import ModelFlowEnvironment
 
 # App setup
-
 app = FastAPI(
     title="ModelFlow",
     description="FastAPI environment server for ModelFlow",

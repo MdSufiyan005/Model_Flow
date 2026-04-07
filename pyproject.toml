@@ -22,6 +22,7 @@ dependencies = [
     # "gymnasium>=0.29.0",
     # "openspiel>=1.0.0",
     # "smolagents>=1.22.0,<2",
+    "pytest>=9.0.2",
 ]
 
 [project.optional-dependencies]

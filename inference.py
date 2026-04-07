@@ -482,7 +482,7 @@ def get_system_prompt(
     return f"""You are an ML infrastructure orchestrator managing a GPU server.
 Your goal: clear ALL queued requests with minimum steps and penalties.
 
-━━━ HARDWARE ━━━
+HARDWARE
 RAM limit:      {ram_limit_mb} MB
 System overhead: {SYSTEM_OVERHEAD_MB} MB (always reserved)
 Effective free:  {free_mb} MB right now
@@ -524,13 +524,13 @@ QUANT TIERS
 7. REPLACE over EVICT+LOAD: When swapping quant on the same model, use REPLACE — it
    is faster and cheaper than EVICT followed by LOAD.
 
-━━━ PENDING WORK ━━━
+PENDING WORK
 {work_str}
 
-━━━ AVAILABLE CONFIGS ━━━
+AVAILABLE CONFIGS
 {roster_str}
 
-━━━ ACTIONS ━━━
+ACTIONS
   LOAD(model_id, quant_type)
   EXECUTE(model_id, quant_type, batch_size)
   EVICT(model_id, quant_type)
@@ -668,7 +668,7 @@ def run_task(task_name: str):
                         response_format={"type": "json_object"} if USE_GROQ_ONLY else None,
                     )
                     raw = response.choices[0].message.content.strip()
-                    # print(f"[LLM RAW]: {raw}", file=sys.stderr)
+                    print(f"[LLM RAW]: {raw}", file=sys.stderr)
                     action_dict = parse_action(raw)
                     break
                 except Exception as e:
@@ -702,9 +702,10 @@ def run_task(task_name: str):
 
             done_str  = "true" if done else "false"
             error_val = obs.last_action_error if obs.last_action_error else "null"
-            act_str   = f"{action.command}({action.model_id or ''})"
+            act_str   = f"{action.command}[{action.model_id or ''}"
+            model_quant = f"{act_str}-{action.quant_type}]"
             print(
-                f"[STEP] step={step_num} action={act_str} reward={reward_val:.2f} "
+                f"[STEP] step={step_num} action={model_quant} reward={reward_val:.2f} "
                 f"done={done_str} error={error_val}",
                 flush=True,
             )

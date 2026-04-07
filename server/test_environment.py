@@ -40,7 +40,10 @@ class ModelFlowEnvironment(Environment):
 
     # ── Constructor ──────────────────────────────────────────────────────────
 
-    def __init__(self, benchmark_json: str = "model_flow/Data/combined_model_metrics.json"):
+    def __init__(
+        self,
+        benchmark_json: str = "model_flow/Data/combined_model_metrics.json",
+    ):
         super().__init__()
 
         # Robust data path check (handles local vs. container structure)
@@ -190,6 +193,10 @@ class ModelFlowEnvironment(Environment):
 
         self.groq_client = self._init_groq_client()
         self.groq_model = "llama3-8b-8192"
+
+        self.completion_ages: List[float] = []
+        self.throughput_samples: List[float] = []
+        self.overprovision_count = 0
 
     def reset(self, task_name: str = "single-load", **kwargs):
         if task_name in ["quality-limit", "ram-pressure"]:
@@ -633,7 +640,11 @@ class ModelFlowEnvironment(Environment):
             load_count=self.load_count,
             evict_count=self.evict_count,
             oom_errors=self.oom_errors,
-            idle_steps=self.idle_steps
+            idle_steps=self.idle_steps,
+            # ── NEW ──────────────────────────────────────────────────────────────
+            completion_ages=self.completion_ages.copy(),
+            throughput_samples=self.throughput_samples.copy(),
+            overprovision_count=self.overprovision_count,
         )
 
     def score_task(self) -> float:
