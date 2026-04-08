@@ -27,9 +27,9 @@
         "rouge_l_avg": 16.05311542390194
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 306.83350902248606,
+        "max_cpu_percent": 418.1,
+        "sample_count_avg": 190.25
       }
     },
     {
@@ -59,9 +59,9 @@
         "rouge_l_avg": 25.185185185185187
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 274.6422386129283,
+        "max_cpu_percent": 416.8,
+        "sample_count_avg": 67.375
       }
     },
     {
@@ -91,9 +91,9 @@
         "rouge_l_avg": 35.14098338826193
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 311.5551268048051,
+        "max_cpu_percent": 409.8,
+        "sample_count_avg": 62.25
       }
     },
     {
@@ -123,9 +123,9 @@
         "rouge_l_avg": 30.20990391722099
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 341.35930126073526,
+        "max_cpu_percent": 413.4,
+        "sample_count_avg": 165.75
       }
     },
     {
@@ -155,9 +155,9 @@
         "rouge_l_avg": 18.78746634429937
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 315.86274065219794,
+        "max_cpu_percent": 416.0,
+        "sample_count_avg": 176
       }
     },
     {
@@ -187,9 +187,9 @@
         "rouge_l_avg": 30.38608432595954
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 341.84243317891634,
+        "max_cpu_percent": 422.0,
+        "sample_count_avg": 178
       }
     },
     {
@@ -219,9 +219,9 @@
         "rouge_l_avg": 18.463022323573494
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 293.40613513075607,
+        "max_cpu_percent": 410.7,
+        "sample_count_avg": 154.875
       }
     },
     {
@@ -251,9 +251,9 @@
         "rouge_l_avg": 34.346405228758165
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 284.75803357037387,
+        "max_cpu_percent": 416.7,
+        "sample_count_avg": 146.125
       }
     },
     {
@@ -283,9 +283,9 @@
         "rouge_l_avg": 14.599665259608402
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 309.3810039356781,
+        "max_cpu_percent": 410.0,
+        "sample_count_avg": 193.5
       }
     },
     {
@@ -315,9 +315,9 @@
         "rouge_l_avg": 24.16151645843523
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 306.69401620540725,
+        "max_cpu_percent": 413.6,
+        "sample_count_avg": 73
       }
     },
     {
@@ -347,9 +347,9 @@
         "rouge_l_avg": 29.43060928433269
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 306.0982810242085,
+        "max_cpu_percent": 414.3,
+        "sample_count_avg": 77.875
       }
     },
     {
@@ -379,15 +379,15 @@
         "rouge_l_avg": 29.170094053881716
       },
       "cpu": {
-        "avg_cpu_percent": 0,
-        "max_cpu_percent": 0,
-        "sample_count_avg": 0
+        "avg_cpu_percent": 343.1364639660537,
+        "max_cpu_percent": 413.9,
+        "sample_count_avg": 195
       }
     }
   ],
   "metadata": {
     "total_models": 12,
-    "processed_files": 12,
-    "timestamp": "2026-04-03T19:22:00Z"
+    "processed_files": 13,
+    "timestamp": "2026-04-08T06:58:30.638060Z"
   }
 }

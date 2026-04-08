@@ -241,6 +241,10 @@ class ModelFlowEnvironment(Environment):
         self.oom_errors = 0
         self.reasoning_completed = 0
 
+        self.completion_ages = []
+        self.throughput_samples = []
+        self.overprovision_count = 0
+        
         # print(f"[GRADER] Target Task: {task_name} | RAM Limit: {self.HARDWARE_RAM_MB} MB", file=sys.stderr)
         # print(f"\n[GRADER] Target Task: {self.current_task} | Requests: {self._initial_request_count} (Reasoning: {self._initial_reasoning_count})", file=sys.stderr)
         return self._get_observation()
@@ -390,6 +394,9 @@ class ModelFlowEnvironment(Environment):
                         reward -= penalty
                     else:
                         batch = len(matching)
+                        max_needed_rank = max(COMPLEXITY_MIN_RANK[r.complexity] for r in matching)
+                        if TIER_RANK[slot["tier"]] > max_needed_rank:
+                            self.overprovision_count += 1
                         kv_dynamic = slot["kv_mb_max"] * (batch / 8.0)
                         peak_dynamic = slot["ctx_mb"] + slot["comp_mb"] + kv_dynamic
                         total_peak = self.ram_used_mb + self.active_spike_mb + self.SYSTEM_OVERHEAD_MB + peak_dynamic
@@ -411,12 +418,14 @@ class ModelFlowEnvironment(Environment):
                                     self.reasoning_completed += 1
                                     # print(f"[GRADER] Reasoning request completed!", file=sys.stderr)
                                 processed_ids.append(req.request_id)
+                                self.completion_ages.append(req.age_steps)
 
                             self.queue = [r for r in self.queue if r.request_id not in processed_ids]
 
                             sum_cpu = sum(m["cpu_avg"] for m in self.loaded_models.values())
                             contention = min(0.8, sum_cpu / 400.0)
                             eff_gen_tps = slot["gen_tps"] * (1.0 - contention)
+                            self.throughput_samples.append(eff_gen_tps)
                             p_tok = max(r.prompt_tokens for r in matching)
                             g_tok = sum(r.gen_tokens for r in matching) / math.sqrt(batch)
                             total_time_s = (p_tok / slot["prompt_tps"]) + (g_tok / eff_gen_tps)

@@ -5,7 +5,7 @@ import sys
 from typing import Dict, Optional, List, Tuple
 from dotenv import load_dotenv
 from models import ModelFlowAction, ModelFlowObservation
-from server.test_environment import ModelFlowEnvironment
+from server.modelflow_environment import ModelFlowEnvironment
 
 load_dotenv()
 
@@ -33,7 +33,7 @@ else:
     client       = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
     active_model = MODEL_NAME
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# Config 
 
 BENCHMARK             = "modelflow"
 TASKS                 = ["single-load", "multi-load", "quality-limit", "ram-pressure"]
@@ -51,7 +51,7 @@ ROLE_TO_MODEL: Dict[str, str] = {
     "coder":      "qwen3.5-2b",
 }
 
-# Quant tiers in ascending capability/size order
+# Quant tiers in ascending size order
 QUANT_TIER: Dict[str, str] = {
     "Q4_K_M": "low",
     "Q5_K_M": "medium",
@@ -63,12 +63,12 @@ QUANT_TIER: Dict[str, str] = {
 REASONING_MIN_QUANT = "Q6_K"
 REASONING_QUANTS    = {"Q6_K", "Q8_0"}
 
-# ── FIX 1 & 3: RAM budget calculator ─────────────────────────────────────────
+# : RAM budget calculator 
 
 def ram_free(obs: ModelFlowObservation) -> int:
     """
     Effective free RAM accounting for system overhead and any active spike.
-    Uses the info dict when available (most accurate), falls back to observation fields.
+    Uses the info dict when available, falls back to observation fields.
     """
     return int(obs.info.get(
         "ram_free_mb",
@@ -87,13 +87,13 @@ def model_host_mb(obs: ModelFlowObservation, model_id: str, quant_type: str) -> 
 
 
 def can_load(obs: ModelFlowObservation, model_id: str, quant_type: str) -> bool:
-    """True if loading model_id@quant_type fits within effective free RAM."""
+    """True if loading model_id-quant_type fits within effective free RAM."""
     needed = model_host_mb(obs, model_id, quant_type)
     free   = ram_free(obs)
     return needed <= free
 
 
-# ── FIX 2: Queue intelligence helpers ────────────────────────────────────────
+# Queue intelligence helpers 
 
 def queue_stats(obs: ModelFlowObservation) -> Dict[str, Dict]:
     """
@@ -148,8 +148,6 @@ def can_serve_reasoning(obs: ModelFlowObservation, model_id: str) -> bool:
     q = loaded_quant(obs, model_id)
     return q in REASONING_QUANTS if q else False
 
-
-# ── FIX 7: Robust action parser ───────────────────────────────────────────────
 
 _KNOWN_MODELS = {"gemma-3-4b", "llama_1b", "qwen3.5-2b"}
 _KNOWN_QUANTS = {"Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"}
@@ -225,7 +223,7 @@ def parse_action(response_text: str) -> Dict:
                 "batch_size": 1, "evict_model_id": None, "evict_quant_type": None}
 
 
-# ── FIX 1+2+3+4+5: Pre-action safety override ────────────────────────────────
+# Pre-action safety override 
 
 def get_eviction_target(obs: ModelFlowObservation, exclude_model_id: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
     """Returns (model_id, quant_type) of a loaded model to evict.
@@ -267,7 +265,7 @@ def apply_planning_override(
     """
     q_stats = queue_stats(obs)
 
-    # ── LOAD override ─────────────────────────────────────────────────────────
+    # LOAD override 
     if action.command == "LOAD":
         if not action.model_id or not action.quant_type:
             action.command = "IDLE"
@@ -318,7 +316,7 @@ def apply_planning_override(
                     #       f"free={ram_free(obs)}MB. Emitting IDLE.", file=sys.stderr)
                     action.command = "IDLE"
 
-    # ── REPLACE override ──────────────────────────────────────────────────────
+    #REPLACE override 
     elif action.command == "REPLACE":
         if not action.model_id or not action.quant_type:
             action.command = "IDLE"
@@ -360,7 +358,7 @@ def apply_planning_override(
                 #       f"needs {needed_mb}MB, simulated_free={simulated_free}MB. Emitting IDLE.", file=sys.stderr)
                 action.command = "IDLE"
 
-    # ── EXECUTE override ──────────────────────────────────────────────────────
+    # EXECUTE override 
     elif action.command == "EXECUTE":
         if not action.model_id or not action.quant_type:
             # Try to fill from the only loaded model
@@ -414,7 +412,7 @@ def apply_planning_override(
                     #       f"peak {total_peak:.0f}MB > limit {obs.ram_limit_mb}MB. Emitting IDLE.", file=sys.stderr)
                     action.command = "IDLE"
 
-    # ── EVICT override ────────────────────────────────────────────────────────
+    # EVICT override 
     elif action.command == "EVICT":
         if not obs.loaded_models:
             action.command = "IDLE"
@@ -456,7 +454,79 @@ def build_roster_str(obs: ModelFlowObservation) -> str:
     return "\n".join(lines)
 
 
-
+# ── TERMINAL VISUALIZATION (RAM occupancy per step + action) ─────────────────────
+def print_visualization(
+    task_name: str,
+    step_num: int,
+    obs: ModelFlowObservation,
+    action: Optional[ModelFlowAction] = None,
+    reward: float = 0.0,
+):
+    """Beautiful terminal visualization of RAM occupancy, loaded models,
+    action taken, queue, and progress. Shows how RAM changes after every step."""
+    width = 90
+    border = "=" * width
+    print("\n" + border)
+    
+    if step_num == 0:
+        print(f" TASK: {task_name.upper():^20} | INITIAL STATE ".center(width, "="))
+    else:
+        print(f" TASK: {task_name.upper():^20} | STEP {step_num:2d} ".center(width, "="))
+    print(border)
+    
+    # Loaded models + total weight size
+    if obs.loaded_models:
+        total_mb = sum(v["size_mb"] for v in obs.loaded_models.values())
+        print(f" LOADED MODELS : ({len(obs.loaded_models)} slots, {total_mb}MB total)")
+        for key, slot in obs.loaded_models.items():
+            gen_tps = slot.get("gen_tps", 0)
+            print(f" → {key:<30} | tier={slot['tier']:<6} | {slot['size_mb']}MB | {gen_tps:.1f}t/s")
+    else:
+        print(f" LOADED MODELS : NONE")
+    
+    # RAM usage bar (replaces the original VRAM bar)
+    ram_pct = min(100, int(obs.ram_used_mb / obs.ram_limit_mb * 100))
+    bar = "█" * (ram_pct // 5) + "░" * (20 - ram_pct // 5)
+    print(f" RAM USAGE     : {obs.ram_used_mb:5d} / {obs.ram_limit_mb} MB [{bar}] {ram_pct:3d}%")
+    
+    # Memory spike (if active)
+    if obs.pressure_spike_mb > 0:
+        print(
+            f" MEMORY SPIKE  : {obs.pressure_spike_mb}MB active, "
+            f"{obs.spike_steps_remaining} steps remaining"
+        )
+    
+    # Action taken
+    if step_num == 0:
+        act_str = "ENVIRONMENT RESET (no action yet)"
+    else:
+        mod = action.model_id or ""
+        quant = action.quant_type or ""
+        act_str = (
+            f"{action.command}({mod}-{quant}, batch={action.batch_size})"
+            if mod else f"{action.command}(batch={action.batch_size})"
+        )
+    print(f" ACTION TAKEN  : {act_str}")
+    print(f" REWARD        : {reward:+8.2f}")
+    
+    if obs.last_action_error:
+        print(f" ERROR         : {obs.last_action_error}")
+    elif obs.last_action_feedback:
+        print(f" FEEDBACK      : {obs.last_action_feedback}")
+    
+    # Queue status
+    print(f"\n QUEUE STATUS (pending: {len(obs.queue)})")
+    for i, req in enumerate(obs.queue[:12]):
+        typ = req.model_type.upper().ljust(10)
+        cmplx = req.complexity.upper().ljust(10)
+        print(f" {i+1:2d}. {req.request_id:>8} | {typ} | {cmplx} | age={req.age_steps:2d}")
+    if len(obs.queue) > 12:
+        print(f" ... +{len(obs.queue) - 12} more requests")
+    
+    # Progress
+    completed = obs.info.get("completed", 0)
+    print(f" PROGRESS      : {completed} completed | {len(obs.queue)} pending | Step: {step_num}")
+    print(border + "\n")
 def get_system_prompt(
     roster_str:    str,
     ram_limit_mb: int,
@@ -500,23 +570,28 @@ QUANT TIERS
   Q8_0   = risky  → standard + reasoning
 
  PLANNING RULES (follow strictly) 
+
 1. RAM CHECK FIRST: Before LOAD or REPLACE, verify:
      model_host_mb + current_ram_used + {SYSTEM_OVERHEAD_MB} (overhead) ≤ {ram_limit_mb}
    If it doesn't fit, EVICT something first.
 
-2. EXECUTE PEAK RAM: EXECUTE causes a dynamic peak.
-   Total Peak = current_ram_used + kv_cache + ctx + comp + {SYSTEM_OVERHEAD_MB}.
-   If Total Peak would exceed {ram_limit_mb}, you must EVICT a non-needed model instead of idling.
-   (The environment overrides unsafe loads/executes to EVICT on your behalf, but learn to anticipate it.)
+2. EXECUTE PEAK RAM (CRITICAL): 
+   EXECUTE creates a dynamic memory peak using the values from loaded_models:
+   peak = ctx_mb + comp_mb + (kv_mb_max × batch_size / 8.0)
+   Total RAM after EXECUTE = current_ram_used + peak + {SYSTEM_OVERHEAD_MB}
+   If this would exceed ram_limit_mb, you MUST EVICT a non-needed model first.
 
 3. QUANT SELECTION: If a model has ANY reasoning requests pending → load Q6_K.
    Never load Q5_K_M for a model with reasoning in the queue.
 
-4. BATCH GREEDILY: Always set batch_size = all pending requests for that model (max 8).
-   Processing in larger batches reduces total age penalty.
+4. BATCH GREEDILY + MIXED REQUESTS (NON-NEGOTIABLE):
+   Age penalty exists but is MODERATE. Large negative rewards on EXECUTE (e.g. -200 to -1600) are NORMAL for slow batches — IGNORE them and DO NOT EVICT.
+   Always set batch_size = all pending requests for that model (max 8).
+   If a model has BOTH reasoning AND standard requests, load Q6_K and KEEP IT LOADED until the entire queue for that model is completely empty.
+   Only downgrade gemma-3-4b after ALL reasoning is cleared AND >40 standard requests remain.
 
 5. AVOID PREMATURE EVICTION: Only evict a model when its queue section is FULLY drained.
-   Do NOT evict just to make room if the model still has work to do.
+   Do NOT evict just because you see a big negative reward on EXECUTE.
 
 6. EXECUTE-AFTER-LOAD: After every LOAD or REPLACE, immediately EXECUTE that model.
    Do not load then idle.
@@ -542,8 +617,7 @@ Respond ONLY with valid JSON (no markdown):
   "model_id": str|null, "quant_type": str|null, "batch_size": int,
   "evict_model_id": str|null, "evict_quant_type": str|null}}"""
 
-
-# ── Observation → text ────────────────────────────────────────────────────────
+# Observation → text 
 
 def observation_to_text(obs: ModelFlowObservation, q_stats: Dict[str, Dict]) -> str:
     # Outcome
@@ -594,7 +668,7 @@ def observation_to_text(obs: ModelFlowObservation, q_stats: Dict[str, Dict]) -> 
     return "\n".join(filter(None, [outcome, ram_line, loaded_str, work_str, top_str, meta]))
 
 
-# ── Context helpers ────────────────────────────────────────────────────────────
+# Context helpers 
 
 def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
@@ -629,7 +703,7 @@ def build_messages(
     return messages
 
 
-# ── Task runner ───────────────────────────────────────────────────────────────
+# Task runner
 
 def run_task(task_name: str):
     env  = ModelFlowEnvironment()
@@ -643,11 +717,14 @@ def run_task(task_name: str):
 
     print(f"[START] task={task_name} env={BENCHMARK} model={active_model}", flush=True)
 
+    # INITIAL VISUALIZATION (step 0)
+    print_visualization(task_name, 0, obs)
+
     try:
         while not done and step_num < MAX_STEPS_PER_TASK:
             step_num += 1
 
-            # ── Compute derived context ───────────────────────────────────────────
+            # Compute derived context 
             q_stats_now   = queue_stats(obs)
             roster_str    = build_roster_str(obs)
             system_prompt = get_system_prompt(roster_str, obs.ram_limit_mb, q_stats_now, obs)
@@ -655,7 +732,7 @@ def run_task(task_name: str):
             recent        = compressed_history[-CONTEXT_HISTORY_STEPS:]
             messages      = build_messages(system_prompt, recent, obs_text)
 
-            # ── LLM call with retry / backoff ─────────────────────────────────────
+        
             action_dict = {"command": "IDLE", "model_id": None, "quant_type": None,
                            "batch_size": 1, "evict_model_id": None, "evict_quant_type": None}
             for attempt in range(MAX_RETRIES):
@@ -680,7 +757,7 @@ def run_task(task_name: str):
                     else:
                         break
 
-            # ── Build ModelFlowAction ─────────────────────────────────────────────
+            # Build ModelFlowAction 
             action = ModelFlowAction(
                 command         = action_dict.get("command", "IDLE"),
                 model_id        = action_dict.get("model_id"),
@@ -691,14 +768,16 @@ def run_task(task_name: str):
             )
 
 
-            # ── Apply planning overrides (all 7 bug fixes) ────────────────────────
             action = apply_planning_override(action, obs)
 
-            # ── Step environment ──────────────────────────────────────────────────
+            # Step environment
             obs        = env.step(action)
             reward_val = round(obs.reward, 2)
             rewards.append(reward_val)
             done = obs.done
+
+            # DETAILED RAM VISUALIZATION after every action
+            print_visualization(task_name, step_num, obs, action, reward_val)
 
             done_str  = "true" if done else "false"
             error_val = obs.last_action_error if obs.last_action_error else "null"

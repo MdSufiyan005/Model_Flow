@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
 # Project imports
 # ---------------------------------------------------------------------
 from models import ModelFlowAction, ModelFlowObservation
-from server.test_environment import ModelFlowEnvironment
+from server.modelflow_environment import ModelFlowEnvironment
 
 # App setup
 app = FastAPI(
