@@ -150,13 +150,38 @@ model_flow/
 
 ### Local
 ```bash
-# uv setup
-uv .venv
+# Create virtual environment using uv
+uv venv
 source .venv/bin/activate
-uv sync
-python inference.py
-python -m uvicorn server.app:app --port 8000
 
+# Install dependencies
+uv sync
+
+# ==============================
+# Environment Configuration
+# ==============================
+
+# Set to 1 → Use Groq for testing
+# Set to 0 → Use Hugging Face
+export USE_GROQ_ONLY=0
+
+# Common (Hugging Face)
+export API_BASE_URL="https://router.huggingface.co/v1"
+export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
+export HF_TOKEN="your_huggingface_token_here"
+
+# Groq (only required if USE_GROQ_ONLY=1)
+export GROQ_API_KEY="your_groq_api_key_here"
+
+# ==============================
+# Run
+# ==============================
+
+# Run inference script for agent interaction
+python inference.py
+
+# Start server for UI Dashboard or to access endpoints
+python -m uvicorn server.app:app --port 8000 
 ```
 
 ### Docker
