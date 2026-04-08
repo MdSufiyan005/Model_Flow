@@ -10,8 +10,20 @@ pinned: false
 
 # ModelFlow LLM Orchestrator ⚙️
 
-ModelFlow simulates an LLM inference server under RAM constraints. An AI agent acts as infrastructure controller, managing model loading, execution, eviction, and replacement to clear request queues without OOM errors.
+ModelFlow simulates a real-world LLM inference server operating under strict RAM constraints. It processes a stream of incoming requests that require different models, quantization levels, and compute resources.
 
+An AI agent acts as an infrastructure orchestrator, responsible for:
+
+Managing limited RAM capacity
+Loading and evicting models efficiently
+Selecting optimal quantization tiers
+Handling CPU contention and execution delays
+
+The objective is to clear the request queue accurately and efficiently while:
+
+Avoiding Out-Of-Memory (OOM) errors
+Minimizing latency and time penalties
+Maximizing overall system performance
 
 ## Table of Contents
 - [Manual UI Interaction](#manual-ui-interaction)
@@ -108,7 +120,7 @@ A set of 14 mixed requests, with more reasoning‑heavy tasks. The agent must pi
 model_flow/
 │
 ├── inference.py          → Main execution loop (LLM decision-making + env interaction)
-├── client.py             → Client interface to send requests / interact with system
+├── client.py            
 ├── config.py             → Global configuration (models, API settings, retries)
 ├── graders.py            → Evaluation and scoring logic for benchmarking
 ├── models.py             → Shared data classes (actions, observations, request schema)
@@ -163,7 +175,7 @@ uv sync
 
 # Set to 1 → Use Groq for testing
 # Set to 0 → Use Hugging Face
-export USE_GROQ_ONLY=0
+export USE_GROQ_ONLY=0 # DEFAULT USE_GROQ_ONLY=0
 
 # Common (Hugging Face)
 export API_BASE_URL="https://router.huggingface.co/v1"
