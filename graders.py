@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 import statistics
 
-# EpisodeResult — populated by the environment at episode end
+# EpisodeResult - populated by the environment at episode end
 
 @dataclass
 class EpisodeResult:

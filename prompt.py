@@ -26,7 +26,7 @@ def get_system_prompt(
 ) -> str:
     """
     Concise system prompt. RAM arithmetic is offloaded to tools so the prompt
-    no longer needs to spell out formulas — just rules.
+    no longer needs to spell out formulas - just rules.
     """
     free_mb = ram_free(obs)
     loaded_parts = [f"{k}: {v['size_mb']}MB tier={v['tier']}" for k, v in obs.loaded_models.items()]
@@ -51,7 +51,7 @@ QUANT TIERS
   Q4_K_M / Q5_K_M = standard only  |  Q6_K / Q8_0 = standard + reasoning
 
 DECISION RULES
-  1. Read RAM ANALYSIS in the observation — it already tells you if a LOAD fits and if EXECUTE is safe.
+  1. Read RAM ANALYSIS in the observation - it already tells you if a LOAD fits and if EXECUTE is safe.
   2. Any model with reasoning requests → Q6_K minimum.
   3. batch_size = all pending requests for that model (max 8).
   4. EXECUTE immediately after every LOAD / REPLACE.

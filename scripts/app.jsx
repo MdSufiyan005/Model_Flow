@@ -33,7 +33,7 @@ function App() {
   const [autoRunning, setAutoRunning] = React.useState(false);
   const [showStatusPopup, setShowStatusPopup] = React.useState(true);
   const [log, setLog] = React.useState([
-    { step: 0, feedback: "Ready — choose task & press START" },
+    { step: 0, feedback: "Ready - choose task & press START" },
   ]);
   const [currentAction, setCurrentAction] = React.useState({
     command: "LOAD",

@@ -88,11 +88,17 @@ https://haider584-modelflow.hf.space
 ***
 
 ## Tasks
+1. **Single Load (Easy)**:
+A small batch of 9 simple, similar chatbot requests. This tests whether the agent can keep one model loaded and reuse it efficiently, without constantly reloading or swapping models unnecessarily.
 
-1. **Single Load** → Smaller queue, repeated requests
-2. **Multi Load** → Mixed requests across model families
-3. **Quality Limit** → Reasoning-heavy requests, strict quality needs
-4. **RAM Pressure** → Hard memory conditions + frequent spikes
+2. **Multi Load (Medium)**:
+A mix of 12 requests across chatbot, coder, and translator models, including both standard and reasoning tasks. This checks how well the agent chooses the right model on the fly and switches between them while balancing speed and memory.
+
+2. **Quality Limit (Hard)**:
+A set of 14 mixed requests, with more reasoning‑heavy tasks. The agent must pick stronger models for complex questions while still watching resource limits, testing its ability to make quality‑aware decisions under pressure.
+
+3. **RAM Pressure (Hard+)**:
+12 complex requests, with frequent reasoning demands under tight memory conditions. This pushes the agent to the limit in managing RAM loading, unloading, and evicting models smartly without triggering out‑of‑memory errors (OOM).
 
 ***
 
@@ -144,17 +150,12 @@ model_flow/
 
 ### Local
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python inference.py
-uvicorn model_flow.server.app:app --port 8000
-```
-```bash
 # uv setup
+uv .venv
+source .venv/bin/activate
 uv sync
-uv run python inference.py
-uv run uvicorn model_flow.server.app:app --port 8000
+python inference.py
+python -m uvicorn server.app:app --port 8000
 
 ```
 

@@ -1,5 +1,5 @@
 """
-tools.py — Agent introspection tools for ModelFlow inference.
+tools.py - Agent introspection tools for ModelFlow inference.
 
 Three tools are exposed to the LLM via OpenAI function-calling:
   • get_model_size       → host RAM (MB) for a model+quant pair
@@ -162,9 +162,9 @@ def dispatch_tool_call(
 
     Parameters
     ----------
-    tool_name : str         — one of get_model_size / can_load / simulate_execute_peak
-    arguments : str | dict  — raw JSON string or already-parsed dict from the LLM
-    obs       : ModelFlowObservation — current environment observation (injected)
+    tool_name : str         - one of get_model_size / can_load / simulate_execute_peak
+    arguments : str | dict  - raw JSON string or already-parsed dict from the LLM
+    obs       : ModelFlowObservation - current environment observation (injected)
 
     Returns
     -------

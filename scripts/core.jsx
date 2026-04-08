@@ -9,7 +9,7 @@ const C = {
 
 const TIER_C = { low: C.tierLow, medium: C.tierMed, high: C.tierHigh, risky: C.tierRisky };
 const CMD_C = { LOAD: C.gold, EXECUTE: C.green, EVICT: C.red, IDLE: C.dimText, REPLACE: C.purple };
-const CMD_ICON = { LOAD: "↑", EXECUTE: "▶", EVICT: "↓", IDLE: "—", REPLACE: "↔" };
+const CMD_ICON = { LOAD: "↑", EXECUTE: "▶", EVICT: "↓", IDLE: "-", REPLACE: "↔" };
 const ROLE_C = { chatbot: C.gold, translator: C.green, coder: C.blue };
 const ROLE_LBL = { chatbot: "CHAT", translator: "TRNSL", coder: "CODE" };
 
