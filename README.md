@@ -198,8 +198,8 @@ python -m uvicorn server.app:app --port 8000
 
 ### Docker
 ```bash
-docker build -t modelflow_test -f Dockerfile .
-docker run -d -p 8000:8000 modelflow_test
+docker build -t modelflow -f Dockerfile .
+docker run -d -p 8000:8000 modelflow
 ```
 
 **Access:**
