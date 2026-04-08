@@ -20,7 +20,6 @@ from models import ModelFlowAction
 from prompt import build_messages, build_roster_str, get_system_prompt, observation_to_text
 from server.modelflow_environment import ModelFlowEnvironment
 
-
 def run_task(task_name: str):
     env = ModelFlowEnvironment()
     obs = env.reset(task_name=task_name)
@@ -87,9 +86,15 @@ def run_task(task_name: str):
 
             done_str = "true" if done else "false"
             error_val = obs.last_action_error or "null"
+            requested_batches = action.batch_size or 1
+            executed_batches = requested_batches if action.command == "EXECUTE" and not obs.last_action_error else 0
+            not_executed_batches = requested_batches - executed_batches
+
             print(
-                f"[STEP] step={step_num} action={action.command}[{action.model_id or ''}"
-                f"-{action.quant_type}] reward={reward_val:.2f} done={done_str} error={error_val}",
+                f"[STEP] step={step_num} "
+                f"action={action.command}[{action.model_id or ''}-{action.quant_type}, "
+                f"batch={requested_batches}, executed={executed_batches}, not_executed={not_executed_batches}] "
+                f"reward={reward_val:.2f} done={done_str} error={error_val}",
                 flush=True,
             )
 
