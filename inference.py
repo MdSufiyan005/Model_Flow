@@ -32,7 +32,7 @@ def run_task(task_name: str):
     score = 0.0
 
     print(f"[START] task={task_name} env={BENCHMARK} model={active_model}", flush=True)
-    print_visualization(task_name, 0, obs)
+    # print_visualization(task_name, 0, obs)
 
     try:
         while not done and step_num < MAX_STEPS_PER_TASK:
@@ -57,7 +57,7 @@ def run_task(task_name: str):
             for attempt in range(MAX_RETRIES):
                 try:
                     raw = llm_call(messages)
-                    print(f"[LLM RAW]: {raw}", file=sys.stderr)
+                    # print(f"[LLM RAW]: {raw}", file=sys.stderr)
                     action_dict = parse_action(raw)
                     break
                 except Exception as e:
@@ -83,7 +83,7 @@ def run_task(task_name: str):
             rewards.append(reward_val)
             done = obs.done
 
-            print_visualization(task_name, step_num, obs, action, reward_val)
+            # print_visualization(task_name, step_num, obs, action, reward_val) Uncomment it to get viz in terminal
 
             done_str = "true" if done else "false"
             error_val = obs.last_action_error or "null"
