@@ -8,19 +8,36 @@ app_port: 8000
 pinned: false
 ---
 
-https://haider584-modelflow.hf.space
-
 # ModelFlow LLM Orchestrator ⚙️
 
 ModelFlow simulates an LLM inference server under RAM constraints. An AI agent acts as infrastructure controller, managing model loading, execution, eviction, and replacement to clear request queues without OOM errors.
 
-## Key Features
 
-- Model loading/eviction strategies
-- Memory-aware scheduling
-- Quantization tradeoffs
-- Reasoning vs standard request handling
-- Safe execution under RAM pressure
+## Table of Contents
+- [Manual UI Interaction](#manual-ui-interaction)
+- [Images](#images)
+  - [Dashboard 1](#dashboard-1)
+  - [Dashboard 2](#dashboard-2)
+  - [Terminal Output](#terminal-output)
+- [How It Works](#how-it-works)
+- [Tasks](#tasks)
+- [Project Structure](#project-structure)
+- [Quick Setup](#quick-setup)
+- [Dataset & Baseline](#dataset--baseline)
+
+
+## Manual UI Interaction
+https://haider584-modelflow.hf.space
+
+## Images
+
+### Dashboard 
+![Dashboard 1](Images/dash1.png)
+![Dashboard 2](Images/dash2.png)
+
+### Terminal Output
+![Terminal Output](Images/Terminal-Output_.png)
+
 
 ## How It Works
 
@@ -70,7 +87,7 @@ ModelFlow simulates an LLM inference server under RAM constraints. An AI agent a
 ```
 ***
 
-## Benchmark Tasks
+## Tasks
 
 1. **Single Load** → Smaller queue, repeated requests
 2. **Multi Load** → Mixed requests across model families
