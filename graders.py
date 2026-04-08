@@ -18,14 +18,10 @@ class EpisodeResult:
     evict_count: int
     oom_errors: int = 0
     idle_steps: int = 0
-
-    # ── NEW FIELDS ────────────────────────────────────────────────────────────
     completion_ages: List[float] = field(default_factory=list)   # age_steps at serve time
     throughput_samples: List[float] = field(default_factory=list) # effective gen_tps per EXECUTE
     overprovision_count: int = 0   # batches served at higher tier than needed
 
-
-# ── SLA / Latency helpers ─────────────────────────────────────────────────────
 
 SLA_THRESHOLD_STEPS = 40   # requests served within this age are "on time"
 
@@ -65,7 +61,7 @@ def _overprovision_score(total_executes: int, overprovision_count: int) -> float
     return max(0.0, 1.0 - ratio * 0.8)   # full over-provision → 0.2 floor
 
 
-# ── Individual graders (updated weight splits) ───────────────────────────────
+# Individual graders 
 
 def grade_single_load(result: EpisodeResult) -> float:
     total      = result.total_requests

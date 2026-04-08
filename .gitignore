@@ -147,7 +147,7 @@ activemq-data/
 
 # SageMath parsed files
 *.sage.py
-
+openenv_modelflow.egg-info
 # Environments
 .env
 .envrc

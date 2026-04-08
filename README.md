@@ -4,113 +4,167 @@ emoji: ⚙️
 colorFrom: purple
 colorTo: blue
 sdk: docker
-pinned: false
 app_port: 8000
-base_path: /web
+pinned: false
 ---
 
 https://haider584-modelflow.hf.space
 
-# ModelFlow - LLM Infrastructure Orchestrator
+# ModelFlow LLM Orchestrator ⚙️
 
-## Environment Description & Motivation
+ModelFlow simulates an LLM inference server under RAM constraints. An AI agent acts as infrastructure controller, managing model loading, execution, eviction, and replacement to clear request queues without OOM errors.
 
-ModelFlow is a high-fidelity OpenEnv simulation designed for real-world LLM inference server management. The motivation behind this environment is to simulate the complexities of managing a constrained CPU-based inference cluster where dynamic memory spikes, quantization tradeoffs, and hardware limits are present. 
+## Key Features
 
-An AI agent must act as an infrastructure orchestrator to balance RAM capacity, quantization tiers, model loads, and CPU contention. The goal is to clear an incoming request queue accurately and efficiently while avoiding Out-Of-Memory (OOM) errors and time penalties.
+- Model loading/eviction strategies
+- Memory-aware scheduling
+- Quantization tradeoffs
+- Reasoning vs standard request handling
+- Safe execution under RAM pressure
 
-## Action Space
+## How It Works
 
-The environment uses a discrete, parameterized action space:
+**Environment provides:**
+- Current RAM usage
+- Pending request queue
+- Loaded models
+- Available model/quantization options
+- Action feedback
 
-- **`LOAD(model_id, quant_type)`**: Load a model to RAM. Incurs a time penalty proportional to the model's weight size and load-time metrics.
-- **`EXECUTE(model_id, quant_type, batch_size)`**: Run inference for a batch of queued requests matching the model. Execution takes multiple steps and incurs a dynamic RAM peak.
-- **`EVICT(model_id, quant_type)`**: Remove a resident model to free up RAM.
-- **`REPLACE(model_id, quant_type, evict_model_id, evict_quant_type)`**: Swap out one model for another in a single fluid operation.
-- **`IDLE`**: Wait one step. Incurs a penalty for queue aging.
+**Agent actions:**
+- `LOAD(model_id, quant_type)` → Load model into RAM
+- `EXECUTE(model_id, quant_type, batch_size)` → Process queued requests
+- `EVICT(model_id, quant_type)` → Remove model from memory
+- `REPLACE(model_id1, quant1, model_id2, quant2)` → Swap models
+- `IDLE` → Do nothing for one step
 
-## Observation Space
+**Observation (General):**
+```
+💾 Memory
 
-Agents receive dynamic state feedback via a Pydantic model (`ModelFlowObservation`):
+* ram_used_mb → used RAM
+* ram_limit_mb → total RAM
+* ram_free_mb → free RAM
+* pressure_spike_mb` → temporary spike
+* spike_steps_remaining → spike duration
 
-- **`ram_used_mb`**: Current allocated RAM (weights + runtime overhead).
-- **`ram_limit_mb`**: Physical RAM capacity limit.
-- **`pressure_spike_mb`**: Random external memory pressure simulating other system processes consuming RAM.
-- **`queue`**: List of pending requests (`RequestInfo`) mapped to roles, varying in complexity (standard vs. reasoning).
-- **`loaded_models`**: Dictionary of currently resident models with size, tier, and live performance statistics.
-- **`model_summary`**: Catalog of available model performance specifications.
+⚙️ System
 
-## Task Descriptions & Expected Difficulty
+* loaded_models → currently loaded models
+* queue → pending requests
+* model_summary → available models info
+* available_model_types → chatbot / translator / coder
 
-ModelFlow includes 4 carefully calibrated tasks, each governed by programmatic graders (0.0 - 1.0 scale):
+📊 State
 
-1. **Multi Load (Easy)**: 12 mixed requests. Tests the agent's ability to carefully pack all 3 model families (Gemma, Llama, Qwen) into RAM simultaneously without triggering OOM.
-2. **Single Load (Medium)**: 9 homogeneous requests. Penalizes re-loading/thrashing; requires stable model residency over consecutive requests.
-3. **Quality Limit (Hard)**: 14 mixed requests heavily reliant on reasoning tasks. Demands careful selection of high-tier quantization models while staying under tighter RAM limits.
-4. **RAM Pressure (Extreme)**: 12 complex requests during heavy random spike conditions with tighter baseline limits. Deeply tests safety margins, proactive evictions, and OOM avoidance strategies.
+* last_action_feedback → result of last action
+* last_action_error → last error
+* step_count → current step
+* done → episode finished
 
-## Setup & Usage Instructions
+📈 Performance
 
-### Prerequisites
+* info → metrics (reward, completed, pending, loads, evicts, etc.)
+* reward → current reward
 
-- `openenv-core`
-- `groq` (Optional for remote inference proxy testing)
-- `openai` (For the `inference.py` LLM-driven baseline agent)
+```
+***
 
-### Local Validation
+## Benchmark Tasks
 
+1. **Single Load** → Smaller queue, repeated requests
+2. **Multi Load** → Mixed requests across model families
+3. **Quality Limit** → Reasoning-heavy requests, strict quality needs
+4. **RAM Pressure** → Hard memory conditions + frequent spikes
+
+***
+
+## 📁 Project Structure
+
+```
+model_flow/
+│
+├── inference.py          → Main execution loop (LLM decision-making + env interaction)
+├── client.py             → Client interface to send requests / interact with system
+├── config.py             → Global configuration (models, API settings, retries)
+├── graders.py            → Evaluation and scoring logic for benchmarking
+├── models.py             → Shared data classes (actions, observations, request schema)
+├── prompt.py             → Builds prompts and formats environment state for LLM
+├── README.md             → Project documentation
+├── requirements.txt      → Python dependencies
+├── Dockerfile            → Container setup for deployment
+├── pyproject.toml        → Project metadata and build configuration
+├── openenv.yaml          → Environment configuration (OpenEnv setup)
+│
+├── Data/
+│   └── combined_model_metrics.json  → Model performance stats (RAM, latency, throughput)
+│
+├── helpers/
+│   ├── context_utils.py     → Context/window management for LLM inputs
+│   ├── llm_utils.py         → LLM API calls, retries, response handling
+│   ├── model_utils.py       → Model size, quantization, load feasibility logic
+│   ├── planning.py          → Safety layer (overrides bad actions, constraints)
+│   ├── queue_utils.py       → Queue analysis (pending requests, workload)
+│   ├── tools.py             → Core simulation utilities (memory checks, execution)
+│   └── visualization.py     → Debugging and terminal visualization tools
+│
+├── server/
+│   ├── app.py                  → FastAPI server (API endpoints + backend)
+│   ├── constants.py            → System constants (quant levels, limits)
+│   ├── groq_helper.py          → Optional Groq API integration
+│   ├── metrics_loader.py       → Loads and processes model metrics dataset
+│   └── modelflow_environment.py → Core simulation engine (step, reset, rewards)
+│
+├── scripts/
+│   ├── dashboard.html  → Base HTML for frontend dashboard
+│   ├── app.jsx         → Main React app component
+│   ├── core.jsx        → Core dashboard logic
+│   ├── index.jsx       → Entry point for React app
+│   └── ui.jsx          → UI components and layout
+```
+***
+## Quick Setup
+
+### Local
 ```bash
-# Set up dependencies
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-
-# Run the baseline agent orchestrator 
 python inference.py
-
-# Run the OpenEnv interactive server interface (optional)
 uvicorn model_flow.server.app:app --port 8000
 ```
-
-### Docker 
-
-To run the orchestrator environment in a container:
-
 ```bash
-# Build the image from project root
-docker build -t modelflow_test -f model_flow/Dockerfile model_flow/ or
-docker build -t modelflow_test -f Dockerfile .
+# uv setup
+uv sync
+uv run python inference.py
+uv run uvicorn model_flow.server.app:app --port 8000
 
-# Run the container (Map host:container port 8000)
-docker run -d --name openenv_cont -p 8000:8000 modelflow_test
-
-# Access the interface
-# http://localhost:8000/docs      <- API
-# http://localhost:8000/dashboard <- Retro Dashboard
 ```
 
-## Baseline Scores
+### Docker
+```bash
+docker build -t modelflow_test -f Dockerfile .
+docker run -d -p 8000:8000 modelflow_test
+```
 
-The baseline agent orchestrator, leveraging heuristics and safety overrides, achieves the following calibrated scores out of 1.0. These results were obtained using the following agent configuration:
+**Access:**
+- API Docs: `http://localhost:8000/docs`
+- Dashboard: `http://localhost:8000/dashboard`
 
-- **LLM Agent**: `llama-3.3-70b-versatile`
-- **Inference API**: **Groq API** (used for testing and development)
+***
 
-### Task Scores
-- **Single Load**: 1.000
-- **Multi Load**: 0.800
-- **Quality Limit**: 0.900
-- **RAM Pressure**: 1.000
+## Dataset & Baseline
 
-## Dataset
+**Dataset:** `Data/combined_model_metrics.json`  
+**Profiled on:** Intel i3 laptop (8GB RAM)  
+**Source:** [Benchmarking repo](https://github.com/MdSufiyan005/BenchMarking)
 
-I recorded the benchmark data profiling on a **Intel i3 laptop with 8 GB RAM**.  
-This real-world, low-resource profiling ensures the simulation accurately reflects practical constraints of edge and constrained inference orchestration.
+**Baseline Scores (Agent: GROQ API – LLaMA 3.3 70B Versatile):**
+| Task          | Score |
+| ------------- | ----- |
+| Single Load   | 0.88  |
+| Multi Load    | 0.64  |
+| Quality Limit | 0.69  |
+| RAM Pressure  | 0.54  |
 
-**Benchmarking Code**:  
-[https://github.com/MdSufiyan005/BenchMarking](https://github.com/MdSufiyan005/BenchMarking)
 
-**Dataset Location**:  
-`model_flow/Data/combined_model_metrics.json`
-
-This JSON contains metrics including weight size, host memory, context/compute/KV overhead, load times, and average CPU usage for (`gemma-3-4b`, `llama_1b`, `qwen3.5-2b`). It is loaded automatically by `ModelFlowEnvironment` at initialization.

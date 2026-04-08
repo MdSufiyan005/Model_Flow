@@ -29,10 +29,6 @@ class RequestInfo(BaseModel):
 class ModelFlowObservation(BaseModel):
     ram_used_mb: int
     ram_limit_mb: int = 8000
-
-    # Multi-model co-loading:
-    #   key   = "model_id-quant_type"  e.g. "llama_1b-Q4_K_M"
-    #   value = {"model": str, "quant": str, "tier": str, "size_mb": int}
     loaded_models: Dict[str, dict] = Field(default_factory=dict)
 
     queue: List[RequestInfo] = Field(default_factory=list)
