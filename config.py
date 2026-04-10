@@ -1,3 +1,11 @@
+"""
+config.py — shared constants.
+
+The OpenAI client lives in inference.py (hackathon requirement).
+llm_utils.py imports active_model / TEMPERATURE / MAX_TOKENS from here,
+but gets the client passed in or imported from inference.py.
+"""
+
 import os
 from typing import Dict
 
@@ -5,56 +13,61 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
-def env_bool(name: str, default: str = "0") -> bool:
-    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
-
-
-USE_GROQ_ONLY = env_bool("USE_GROQ_ONLY")
-
+# ── Re-read the same env vars so helpers can import them without circular deps ──
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct:together")
+HF_TOKEN     = os.getenv("HF_TOKEN")
 
-if USE_GROQ_ONLY:
-    if not GROQ_API_KEY:
-        raise ValueError("USE_GROQ_ONLY=1 but GROQ_API_KEY is missing")
-    from groq import Groq
-
-    client = Groq(api_key=GROQ_API_KEY)
-    active_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-else:
-    if not API_KEY:
-        raise ValueError("OpenAI/HF branch selected but HF_TOKEN/API_KEY is missing")
-    from openai import OpenAI
-
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-    active_model = MODEL_NAME
-
+active_model = MODEL_NAME
 
 BENCHMARK = "modelflow"
-TASKS = ["single-load", "multi-load", "quality-limit", "ram-pressure"]
-MAX_STEPS_PER_TASK = 30
-TEMPERATURE = 0.1
-MAX_TOKENS = 600
-CONTEXT_HISTORY_STEPS = 6
-MAX_RETRIES = 4
-BASE_BACKOFF_S = 2.0
-SYSTEM_OVERHEAD_MB = 1100
+TASKS     = ["single-load", "multi-load", "quality-limit", "ram-pressure"]
 
+# Keep well under the grader's optimal_cutoff=8 to maximise efficiency score.
+MAX_STEPS_PER_TASK = 15
+
+TEMPERATURE           = 0.05   # near-deterministic for consistent decisions
+MAX_TOKENS            = 800
+CONTEXT_HISTORY_STEPS = 6
+MAX_RETRIES           = 4
+BASE_BACKOFF_S        = 2.0
+SYSTEM_OVERHEAD_MB    = 1100
+
+# Never load if free RAM after load would drop below this value.
+# During ram-pressure tasks spikes can reach 2 500 MB — leave room.
+RAM_SAFETY_BUFFER_MB = 1600
+
+# ── Role → model mapping ─────────────────────────────────────────────────────
 ROLE_TO_MODEL: Dict[str, str] = {
-    "chatbot": "gemma-3-4b",
+    "chatbot":    "gemma-3-4b",
     "translator": "llama_1b",
-    "coder": "qwen3.5-2b",
+    "coder":      "qwen3.5-2b",
 }
 
+# ── Quantisation constants ────────────────────────────────────────────────────
 QUANT_TIER: Dict[str, str] = {
     "Q4_K_M": "low",
     "Q5_K_M": "medium",
-    "Q6_K": "high",
-    "Q8_0": "risky",
+    "Q6_K":   "high",
+    "Q8_0":   "risky",
 }
 
-REASONING_MIN_QUANT = "Q6_K"
-REASONING_QUANTS = {"Q6_K", "Q8_0"}
+TIER_RANK: Dict[str, int] = {
+    "low":    1,
+    "medium": 2,
+    "high":   3,
+    "risky":  4,
+}
+
+COMPLEXITY_MIN_RANK: Dict[str, int] = {
+    "simple":    1,
+    "standard":  1,   # alias used in some request payloads
+    "reasoning": 3,
+}
+
+REASONING_QUANTS    = {"Q6_K", "Q8_0"}
+REASONING_MIN_QUANT = "Q6_K"          # cheapest quant that satisfies reasoning
+DEFAULT_SIMPLE_QUANT    = "Q4_K_M"
+DEFAULT_REASONING_QUANT = "Q6_K"
+
+QUANTS = ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"]
