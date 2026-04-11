@@ -173,15 +173,10 @@ uv sync
 # Environment Configuration
 # ==============================
 
-
-
-# Common (Hugging Face)
 export API_BASE_URL="https://router.huggingface.co/v1"
 export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
 export HF_TOKEN="your_huggingface_token_here"
 
-# Groq (only required if USE_GROQ_ONLY=1)
-export GROQ_API_KEY="your_groq_api_key_here"
 
 # ==============================
 # Run
@@ -201,8 +196,8 @@ docker run -d -p 8000:8000 modelflow
 ```
 
 **Access:**
+- Dashboard: `http://localhost:8000/`
 - API Docs: `http://localhost:8000/docs`
-- Dashboard: `http://localhost:8000/dashboard`
 
 ***
 
