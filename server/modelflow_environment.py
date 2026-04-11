@@ -2,10 +2,9 @@ import math
 import os
 import random
 from typing import Dict, List
-
+print('hii')
 from openenv.core.env_server import Environment
 
-# from models import ModelFlowObservation, RequestInfo, ModelFlowAction
 from model_flow.models import ModelFlowObservation, RequestInfo, ModelFlowAction
 from .constants import (
     ACTIVE_MODELS,
@@ -17,7 +16,7 @@ from .constants import (
     QUANTS,
 )
 from .metrics_loader import load_roster
-
+import model_flow.rewards as R
 
 class ModelFlowEnvironment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
@@ -161,12 +160,11 @@ class ModelFlowEnvironment(Environment):
             self._tick_spike()
             for req in self.queue:
                 req.age_steps += 1
-                penalty_val = 0.001 * (req.age_steps ** 1.2)
-                reward -= min(penalty_val, 0.5)
+            reward += R.clock_tick_penalty(self.queue, self.loaded_models)
 
-            if len(self.queue) > 0 and len(self.loaded_models) == 0:
-                reward -= 2.0
-
+        # ------------------------------------------------------------------
+        # LOAD
+        # ------------------------------------------------------------------
         if action.command == "LOAD":
             _clock_tick()
             if not action.model_id or not action.quant_type:
@@ -177,7 +175,7 @@ class ModelFlowEnvironment(Environment):
                     self.last_error = f"Unknown config: {key}"
                 elif key in self.loaded_models:
                     self.last_error = f"{key} is already loaded"
-                    reward -= 5.0
+                    reward += R.load_already_loaded()
                 else:
                     data = self.roster[key]
                     host_size = data["host_mb"]
@@ -192,7 +190,7 @@ class ModelFlowEnvironment(Environment):
                         self.last_error = (
                             f"OOM: {key} needs {host_size:.0f}MB, only {effective_free:.0f}MB free"
                         )
-                        reward -= 30.0
+                        reward += R.load_oom()
                         self.oom_errors += 1
                     else:
                         is_warm = key in self.evicted_cache
@@ -224,27 +222,28 @@ class ModelFlowEnvironment(Environment):
                         }
                         self.ram_used_mb += host_size
                         self.load_count += 1
-                        reward -= actual_load_s * 1.5
 
-                        if len(self.loaded_models) >= 2:
-                            reward += 3.0
+                        reward += R.load_success(actual_load_s, len(self.loaded_models))
 
                         warm_str = " (warm)" if is_warm else " (cold)"
                         self.last_feedback = f"Loaded {key}{warm_str} in {actual_load_s:.1f}s."
 
+        # ------------------------------------------------------------------
+        # EXECUTE
+        # ------------------------------------------------------------------
         elif action.command == "EXECUTE":
             _clock_tick()
             if not action.model_id or not action.quant_type:
                 self.last_error = "EXECUTE requires model_id and quant_type"
-                reward -= 5.0
+                reward += R.execute_bad_args()
             else:
                 key = f"{action.model_id}-{action.quant_type}"
                 if key not in self.loaded_models:
                     self.last_error = f"{key} is not loaded"
-                    reward -= 10.0
+                    reward += R.execute_not_loaded()
                 elif not self.queue:
                     self.last_error = "Queue is empty"
-                    reward -= 5.0
+                    reward += R.execute_empty_queue()
                 else:
                     slot = self.loaded_models[key]
                     target_model = action.model_id
@@ -265,7 +264,6 @@ class ModelFlowEnvironment(Environment):
                             self.failed_execute_history.get(key, 0) + 1
                         )
                         fails = self.failed_execute_history[key]
-                        penalty = 5.0 * (fails ** 2)
 
                         tier_mismatch = any(
                             self.role_to_model.get(req.model_type) == target_model
@@ -281,7 +279,7 @@ class ModelFlowEnvironment(Environment):
                         else:
                             self.last_error = f"No matching requests for {key} (fail #{fails})"
 
-                        reward -= penalty
+                        reward += R.execute_no_match(fails)
                     else:
                         batch = len(matching)
                         max_needed_rank = max(
@@ -301,7 +299,7 @@ class ModelFlowEnvironment(Environment):
 
                         if total_peak > self.HARDWARE_RAM_MB:
                             self.last_error = f"RUNTIME OOM: {key} peaked at {total_peak:.0f}MB"
-                            reward -= 50.0
+                            reward += R.execute_runtime_oom()
                         else:
                             processed_ids = []
                             self.failed_execute_history[key] = 0
@@ -311,11 +309,10 @@ class ModelFlowEnvironment(Environment):
                                 "high": 1.2,
                                 "risky": 1.2,
                             }
-                            multiplier = tier_multipliers.get(slot["tier"], 1.0)
+
+                            reward += R.execute_success(matching, tier_multipliers, slot["tier"])
 
                             for req in matching:
-                                gain = 25.0 if req.complexity == "reasoning" else 15.0
-                                reward += gain * multiplier
                                 self.completed += 1
                                 if req.reasoning:
                                     self.reasoning_completed += 1
@@ -343,6 +340,9 @@ class ModelFlowEnvironment(Environment):
                                 f"(contention: {contention:.1%})."
                             )
 
+        # ------------------------------------------------------------------
+        # EVICT
+        # ------------------------------------------------------------------
         elif action.command == "EVICT":
             _clock_tick()
             if action.model_id and action.quant_type:
@@ -357,24 +357,29 @@ class ModelFlowEnvironment(Environment):
                 self.ram_used_mb -= data.get("size_mb", 0)
                 self.evicted_cache[key] = self.step_count
                 self.evict_count += 1
-                reward -= 10.0
 
                 model_name = key.rsplit("-", 1)[0]
-                if not self._is_model_needed(model_name):
-                    reward += 5.0
+                still_needed = self._is_model_needed(model_name)
+                reward += R.evict_success(data.get("size_mb", 0), still_needed)
 
                 self.last_feedback = f"Evicted {key}. Freed {data.get('size_mb', 0)}MB."
             else:
                 self.last_error = f"Cannot evict {key or 'nothing'}"
-                reward -= 5.0
+                reward += R.evict_nothing_to_evict()
 
+        # ------------------------------------------------------------------
+        # IDLE
+        # ------------------------------------------------------------------
         elif action.command == "IDLE":
             _clock_tick()
-            reward -= 15.0
+            reward += R.idle_penalty()
             if self.queue:
                 self.idle_steps += 1
             self.last_feedback = "Idled."
 
+        # ------------------------------------------------------------------
+        # REPLACE
+        # ------------------------------------------------------------------
         elif action.command == "REPLACE":
             evict_key = None
             if action.evict_model_id and action.evict_quant_type:
@@ -392,26 +397,22 @@ class ModelFlowEnvironment(Environment):
 
                 evicted_model_name = evict_key.rsplit("-", 1)[0]
                 evicted_needed = self._is_model_needed(evicted_model_name)
-
-                if not evicted_needed:
-                    reward += 2.0
-                else:
-                    reward -= 15.0
+                reward += R.replace_evict_component(evicted_needed)
 
                 _clock_tick()
 
                 if not action.model_id or not action.quant_type:
                     self.last_error = "REPLACE requires model_id and quant_type"
-                    reward -= 5.0
+                    reward += R.replace_bad_load_args()
                 else:
                     new_key = f"{action.model_id}-{action.quant_type}"
 
                     if new_key not in self.roster:
                         self.last_error = f"Unknown config: {new_key}"
-                        reward -= 5.0
+                        reward += R.replace_load_unknown_config()
                     elif new_key in self.loaded_models:
                         self.last_error = f"{new_key} is already loaded"
-                        reward -= 10.0
+                        reward += R.replace_load_already_loaded()
                     else:
                         new_data = self.roster[new_key]
                         host_size = new_data["host_mb"]
@@ -424,11 +425,9 @@ class ModelFlowEnvironment(Environment):
 
                         if host_size > effective_free:
                             self.last_error = f"OOM: {new_key} needs {host_size:.0f}MB free"
-                            reward -= 30.0
+                            reward += R.replace_load_oom()
                             self.oom_errors += 1
                         else:
-                            reward += 5.0
-
                             is_warm = new_key in self.evicted_cache
                             base_load_s = new_data["load_avg_ms"] / 1000.0
                             if is_warm:
@@ -458,26 +457,28 @@ class ModelFlowEnvironment(Environment):
                             self.ram_used_mb += host_size
                             self.load_count += 1
 
-                            reward -= actual_load_s * 1.5
-
                             after_loaded_count = len(self.loaded_models)
-                            if before_loaded_count < 2 and after_loaded_count >= 2:
-                                reward += 1.5
+                            reward += R.replace_load_success(
+                                actual_load_s, before_loaded_count, after_loaded_count
+                            )
 
                             self.last_feedback = (
                                 f"REPLACE: Evicted {evict_key}, Loaded {new_key} in {actual_load_s:.1f}s."
                             )
             else:
                 self.last_error = f"Cannot replace {evict_key or 'nothing'}"
-                reward -= 5.0
+                reward += R.replace_no_target()
 
+        # ------------------------------------------------------------------
+        # Episode terminal conditions
+        # ------------------------------------------------------------------
         if not self.queue:
             done = True
-            reward += 50.0
+            reward += R.episode_success()
             self.last_feedback = "SUCCESS: Queue cleared!"
         elif self.step_count >= self.MAX_STEPS:
             done = True
-            reward -= 50.0
+            reward += R.episode_timeout()
 
         if self.last_error:
             self.last_feedback = f"ERROR: {self.last_error}"
@@ -569,4 +570,3 @@ class ModelFlowEnvironment(Environment):
 
         result = self.get_episode_result()
         return grade(self.current_task, result)
-    
