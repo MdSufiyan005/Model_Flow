@@ -15,22 +15,52 @@ tags:
   - reinforcement-learning
   - llm-ops
 
-
 tasks:
   - id: task1
     name: Single Load Test
     description: >
       9 identical chatbot/standard requests.
       Tests throughput under a single model type with no complexity variance.
-    grader: grade_single_load
+    grader:
+      type: llm
+      prompt_template: >
+        You are evaluating an LLM orchestration system.
+        The agent was given 9 identical chatbot/standard requests and must handle
+        throughput under a single model type with no complexity variance.
+
+        Agent trajectory:
+        {trajectory}
+
+        Score the agent's performance from 0.0 to 1.0 based on:
+        - Correct model assignment for all 9 requests
+        - Consistent throughput without failures or retries
+        - Efficient resource usage (no unnecessary RAM/CPU spikes)
+
+        Respond with only a float between 0.0 and 1.0.
 
   - id: task2
     name: Multi Load
     description: >
-      12 requests across all 3 roles (chatbot ×4, coder ×5, translator ×3).
+      12 requests across all 3 roles (chatbot x4, coder x5, translator x3).
       Escalates from standard to reasoning mid-sequence.
       Tests RAM packing across mixed model types with progressive load increase.
-    grader: grade_multi_load
+    grader:
+      type: llm
+      prompt_template: >
+        You are evaluating an LLM orchestration system.
+        The agent handled 12 requests across chatbot (x4), coder (x5), and translator (x3) roles,
+        escalating from standard to reasoning complexity mid-sequence.
+
+        Agent trajectory:
+        {trajectory}
+
+        Score the agent's performance from 0.0 to 1.0 based on:
+        - Correct role-to-model matching for all 12 requests
+        - Proper handling of complexity escalation (standard → reasoning)
+        - RAM packing efficiency across mixed model types
+        - No crashes or OOM errors during progressive load increase
+
+        Respond with only a float between 0.0 and 1.0.
 
   - id: task3
     name: Quality Limit
@@ -38,7 +68,23 @@ tasks:
       14 requests evenly spread across chatbot, coder, and translator.
       Reasoning requests interleaved throughout (5 of 14).
       Tests role-matching and quality-tier handling under a balanced mixed workload.
-    grader: grade_quality_limit
+    grader:
+      type: llm
+      prompt_template: >
+        You are evaluating an LLM orchestration system.
+        The agent handled 14 requests evenly spread across chatbot, coder, and translator roles,
+        with 5 reasoning-complexity requests interleaved throughout.
+
+        Agent trajectory:
+        {trajectory}
+
+        Score the agent's performance from 0.0 to 1.0 based on:
+        - Accurate role-matching for all 14 requests
+        - Correct quality-tier selection (standard vs reasoning) for interleaved requests
+        - Balanced resource usage across all three model types
+        - No degradation in response quality under mixed workload
+
+        Respond with only a float between 0.0 and 1.0.
 
   - id: task4
     name: RAM Pressure
@@ -46,4 +92,20 @@ tasks:
       12 requests split equally across all 3 roles (4 each).
       Half are reasoning complexity, clustered in the middle of the sequence.
       Tests OOM avoidance and safety margins under sustained high-RAM demand.
-    grader: grade_ram_pressure
+    grader:
+      type: llm
+      prompt_template: >
+        You are evaluating an LLM orchestration system.
+        The agent handled 12 requests (4 per role: chatbot, coder, translator),
+        with 6 reasoning-complexity requests clustered in the middle of the sequence.
+
+        Agent trajectory:
+        {trajectory}
+
+        Score the agent's performance from 0.0 to 1.0 based on:
+        - Successful OOM avoidance during the high-RAM reasoning cluster
+        - Maintained safety margins throughout sustained high-RAM demand
+        - Correct model assignment under memory pressure
+        - Recovery and stability after the reasoning cluster completes
+
+        Respond with only a float between 0.0 and 1.0.
