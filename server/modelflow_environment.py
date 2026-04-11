@@ -16,7 +16,6 @@ from .constants import (
     TIER_RANK,
     QUANTS,
 )
-# from .groq_helper import init_groq_client
 from .metrics_loader import load_roster
 
 
@@ -77,9 +76,6 @@ class ModelFlowEnvironment(Environment):
         self.current_task: str = "single-load"
         self._initial_request_count: int = 0
         self._initial_reasoning_count: int = 0
-
-        # self.groq_client = init_groq_client()
-        # self.groq_model = "llama3-8b-8192"
 
         self.completion_ages: List[float] = []
         self.throughput_samples: List[float] = []
@@ -573,3 +569,4 @@ class ModelFlowEnvironment(Environment):
 
         result = self.get_episode_result()
         return grade(self.current_task, result)
+    

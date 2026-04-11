@@ -39,7 +39,7 @@ Maximizing overall system performance
 
 
 ## Manual UI Interaction
-https://haider584-modelflow.hf.space
+https://huggingface.co/spaces/MdSufiyan005/modelflow
 
 ## Images
 
@@ -146,7 +146,6 @@ model_flow/
 ├── server/
 │   ├── app.py                  → FastAPI server (API endpoints + backend)
 │   ├── constants.py            → System constants (quant levels, limits)
-│   ├── groq_helper.py          → Optional Groq API integration
 │   ├── metrics_loader.py       → Loads and processes model metrics dataset
 │   └── modelflow_environment.py → Core simulation engine (step, reset, rewards)
 │
