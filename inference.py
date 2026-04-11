@@ -253,6 +253,6 @@ def run_task(task_name: str) -> None:
 # Entry Point
 # ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # for task in TASKS:
-    #     run_task(task)
-    run_task("quality-limit")
+    for task in TASKS:
+        run_task(task)
+    # run_task("quality-limit")
