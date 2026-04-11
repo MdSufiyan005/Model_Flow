@@ -3,6 +3,8 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+episode_log.jsonl
+
 # C extensions
 *.so
 validate-submision/
