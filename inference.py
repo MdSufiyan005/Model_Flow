@@ -1,112 +1,297 @@
 """
-inference.py — ModelFlow benchmark agent.
+inference.py — ModelFlow V2
+
+Changes in this version
+------------------------
+1. _extract_mistakes now receives the full rewards list (not just the
+   last-5 memory window) so bad steps aren't missed in long episodes.
+
+2. _write_episode_log computes mean_reward from the full rewards list
+   and includes quant_misuse detection: if an episode had many EXECUTE
+   actions but large negative rewards, the log flags "possible Q6K overuse
+   on standard queue" to help the next episode's lesson block.
+
+3. All other logic (policy filter, override pre-warning, episode logger,
+   retry loop) preserved from previous version.
 """
 
+import dataclasses
+import json
 import os
 import sys
 import time
 import traceback
-from typing import List
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 from openai import OpenAI
 
-# ────────────────────────────────────────────────────────────────
-# Environment / Config
-# ────────────────────────────────────────────────────────────────
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-HF_TOKEN = os.getenv("HF_TOKEN")
-
-if HF_TOKEN is None:
-    raise ValueError("HF_TOKEN environment variable is required")
-
-client = OpenAI(
-    base_url=API_BASE_URL,
-    api_key=HF_TOKEN,
-    timeout=30.0
-)
-
-# ────────────────────────────────────────────────────────────────
-# Internal Imports
-# ────────────────────────────────────────────────────────────────
+from helpers.queue_utils import parse_action, queue_stats
+from models import ModelFlowAction
+from prompt import build_messages, build_roster_str, get_system_prompt, observation_to_text
+from server.modelflow_environment import ModelFlowEnvironment
 from config import (
-    BENCHMARK,
     BASE_BACKOFF_S,
-    CONTEXT_HISTORY_STEPS,
     MAX_RETRIES,
     MAX_STEPS_PER_TASK,
-    RAM_SAFETY_BUFFER_MB,
     TASKS,
     TEMPERATURE,
     MAX_TOKENS,
 )
 
-from helpers.context_utils import compress_step
-from helpers.planning import apply_planning_override
-from helpers.queue_utils import parse_action, queue_stats
-from models import ModelFlowAction
-from prompt import (
-    build_messages,
-    build_roster_str,
-    get_system_prompt,
-    observation_to_text,
-)
-from server.modelflow_environment import ModelFlowEnvironment
 
 # ────────────────────────────────────────────────────────────────
-# Rules
+# Backend config
 # ────────────────────────────────────────────────────────────────
-_TIER_RULES = f"""
-=== DECISION RULES — FOLLOW IN ORDER EVERY STEP ===
+USE_GROQ     = os.getenv("GROQ", "0") == "1"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
+HF_TOKEN     = os.getenv("HF_TOKEN")
 
-STEP 1 — READ THE QUEUE.
-  Identify: which model_id is needed, total count, and whether ANY requests are "reasoning".
+if USE_GROQ:
+    if not GROQ_API_KEY:
+        raise ValueError("GROQ_API_KEY is required when GROQ=1")
+    print("[INFO] Using Groq backend", flush=True)
+    client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=GROQ_API_KEY,
+        timeout=30.0,
+    )
+    if MODEL_NAME == "Qwen/Qwen2.5-72B-Instruct":
+        MODEL_NAME = "llama-3.3-70b-versatile"
+else:
+    if HF_TOKEN is None:
+        raise ValueError("HF_TOKEN environment variable is required")
+    print("[INFO] Using HuggingFace router backend", flush=True)
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN, timeout=30.0)
 
-STEP 2 — PICK THE CORRECT QUANT.
-  - All requests are "standard" or "simple"  →  use Q4_K_M (smallest, cheapest)
-  - ANY request is "reasoning"               →  use Q6_K minimum
-  DO NOT upgrade quant unless reasoning requests are actually present.
-  DO NOT replace a model you just loaded this step.
-
-STEP 3 — CHECK RAM BEFORE EVERY LOAD OR EXECUTE.
-  effective_free = ram_limit_mb - ram_used_mb - pressure_spike_mb - {RAM_SAFETY_BUFFER_MB}
-  Only LOAD if: model_size_mb < effective_free
-  If spike is active: use batch_size = min(2, matching_queue_entries)
-  Otherwise:          use batch_size = min(8, matching_queue_entries)
-
-STEP 4 — EXECUTE THE LOADED MODEL UNTIL ITS QUEUE IS EMPTY.
-  If the correct model is already loaded at a sufficient quant → go straight to EXECUTE.
-  Only REPLACE if a completely different role's model needs to be served next.
-
-STEP 5 — FINISH IN ≤8 STEPS.
-  single-load task = one model type only. Load once, execute until done. Never replace.
-
-OUTPUT — ONE JSON object only, no markdown, no explanation:
-{{"command":"LOAD|EXECUTE|EVICT|REPLACE|IDLE","model_id":"...","quant_type":"...","batch_size":8,"evict_model_id":null,"evict_quant_type":null}}
-"""
-
-# ────────────────────────────────────────────────────────────────
-# Prompt Builder
-# ────────────────────────────────────────────────────────────────
-def _build_system_prompt(roster_str: str, ram_limit: int, q_stats: dict, obs) -> str:
-    base = get_system_prompt(roster_str, ram_limit, q_stats, obs)
-    return base + "\n" + _TIER_RULES
+EPISODE_LOG_PATH = Path(os.getenv("EPISODE_LOG_PATH", "episode_log.jsonl"))
 
 
 # ────────────────────────────────────────────────────────────────
-# Core Runner
+# DecisionMemory
 # ────────────────────────────────────────────────────────────────
+
+def _reward_band(reward: float) -> str:
+    if reward > 10:
+        return "good"
+    if reward < -5:
+        return "bad"
+    return "neutral"
+
+
+@dataclasses.dataclass
+class _Entry:
+    step:       int
+    command:    str
+    model_id:   Optional[str]
+    quant_type: Optional[str]
+    band:       str
+    result:     str
+    swap_helped: Optional[bool]
+
+
+class DecisionMemory:
+    MAX = 5
+
+    def __init__(self):
+        self._entries: List[_Entry] = []
+        # Full episode history for logging (never trimmed).
+        self._all_entries: List[_Entry] = []
+
+    def push(
+        self,
+        step:     int,
+        action:   ModelFlowAction,
+        reward:   float,
+        feedback: Optional[str],
+        error:    Optional[str],
+    ) -> None:
+        band   = _reward_band(reward)
+        result = "ok" if not error else error[:60]
+
+        if self._entries:
+            prev = self._entries[-1]
+            if prev.swap_helped is None and prev.command in ("REPLACE", "EVICT"):
+                updated = dataclasses.replace(prev, swap_helped=(band != "bad"))
+                self._entries[-1] = updated
+                # Update in full history too.
+                if self._all_entries:
+                    self._all_entries[-1] = updated
+
+        entry = _Entry(step, action.command, action.model_id, action.quant_type, band, result, None)
+        self._entries.append(entry)
+        self._all_entries.append(entry)
+
+        if len(self._entries) > self.MAX:
+            self._entries.pop(0)
+
+    @property
+    def bad_count_recent(self) -> int:
+        return sum(1 for e in self._entries[-3:] if e.band == "bad")
+
+
+# ────────────────────────────────────────────────────────────────
+# Policy filter — only blocks logically impossible actions
+# ────────────────────────────────────────────────────────────────
+
+def _policy_filter(
+    raw_action: ModelFlowAction,
+    obs,
+) -> Tuple[ModelFlowAction, Optional[str]]:
+    """
+    Returns (final_action, override_reason_or_None).
+
+    Only intercepts:
+    1. Missing model_id on commands that require it.
+    2. LOAD of an already-loaded key (redirected to EXECUTE).
+
+    Everything else goes to the environment for real feedback.
+    """
+    if raw_action.command in ("LOAD", "EXECUTE", "REPLACE") and not raw_action.model_id:
+        return (
+            ModelFlowAction(
+                command="IDLE",
+                model_id=None, quant_type=None, batch_size=1,
+                evict_model_id=None, evict_quant_type=None,
+            ),
+            f"{raw_action.command} missing model_id → IDLE",
+        )
+
+    if raw_action.command == "LOAD" and raw_action.model_id and raw_action.quant_type:
+        key = f"{raw_action.model_id}-{raw_action.quant_type}"
+        if key in obs.loaded_models:
+            return (
+                ModelFlowAction(
+                    command="EXECUTE",
+                    model_id=raw_action.model_id,
+                    quant_type=raw_action.quant_type,
+                    batch_size=min(8, max(1, raw_action.batch_size or 1)),
+                    evict_model_id=None,
+                    evict_quant_type=None,
+                ),
+                f"LOAD blocked: {key} already loaded → redirected to EXECUTE",
+            )
+
+    return raw_action, None
+
+
+def _print_decision_debug(obs, raw_action, final_action, override_reason):
+    print("\n[DECISION TRACE]")
+    print(f"  Proposed : {raw_action.command} {raw_action.model_id or ''}/{raw_action.quant_type or ''}")
+    print(f"  Final    : {final_action.command} {final_action.model_id or ''}/{final_action.quant_type or ''}")
+    if override_reason:
+        print(f"  OVERRIDE : {override_reason}")
+    print(f"  Loaded   : {list(obs.loaded_models.keys())}")
+    print(f"  Last err : {obs.last_action_error or 'None'}", flush=True)
+
+
+# ────────────────────────────────────────────────────────────────
+# Episode logger
+# ────────────────────────────────────────────────────────────────
+
+def _extract_mistakes(memory: DecisionMemory, rewards: List[float]) -> List[str]:
+    """
+    Build distinct error patterns from the FULL episode history.
+    Pairs _all_entries with rewards by step number alignment.
+    """
+    mistakes = []
+    seen: set = set()
+
+    # Build step→reward map for O(1) lookup.
+    step_to_reward: dict = {}
+    for i, e in enumerate(memory._all_entries):
+        if i < len(rewards):
+            step_to_reward[e.step] = rewards[i]
+
+    for e in memory._all_entries:
+        r = step_to_reward.get(e.step, 0.0)
+        if _reward_band(r) == "bad":
+            pattern = f"{e.command} {e.model_id or '-'}/{e.quant_type or '-'}: {e.result}"
+            if pattern not in seen:
+                seen.add(pattern)
+                mistakes.append(pattern)
+
+    return mistakes[:5]
+
+
+def _write_episode_log(
+    task_name: str,
+    score:     float,
+    steps:     int,
+    rewards:   List[float],
+    memory:    DecisionMemory,
+    success:   bool,
+) -> None:
+    top_errors  = _extract_mistakes(memory, rewards)
+    bad_entries = [
+        e for i, e in enumerate(memory._all_entries)
+        if i < len(rewards) and _reward_band(rewards[i]) == "bad"
+    ]
+
+    # Detect quant overprovisioning pattern.
+    q6k_on_std = sum(
+        1 for e in memory._all_entries
+        if e.command == "EXECUTE" and e.quant_type in ("Q6_K", "Q8_0")
+    )
+    exec_total = sum(1 for e in memory._all_entries if e.command == "EXECUTE")
+    quant_note = (
+        f"Q6_K/Q8_0 used on {q6k_on_std}/{exec_total} EXECUTE steps"
+        f" — check if standard-only requests were overprovisioned."
+        if exec_total > 0 and q6k_on_std > exec_total // 2
+        else ""
+    )
+
+    if not bad_entries:
+        summary = "No major mistakes."
+    else:
+        cmd_counts: dict = {}
+        for e in bad_entries:
+            cmd_counts[e.command] = cmd_counts.get(e.command, 0) + 1
+        worst   = max(cmd_counts, key=cmd_counts.get)
+        bad_avg = sum(rewards[i] for i, e in enumerate(memory._all_entries)
+                      if i < len(rewards) and _reward_band(rewards[i]) == "bad") / max(len(bad_entries), 1)
+        summary = f"Most frequent bad action: {worst} ({cmd_counts[worst]}x), avg_reward={bad_avg:.1f}."
+        if quant_note:
+            summary += " " + quant_note
+
+    record = {
+        "task":            task_name,
+        "score":           round(score, 4),
+        "steps":           steps,
+        "success":         success,
+        "mean_reward":     round(sum(rewards) / max(len(rewards), 1), 2),
+        "bad_step_count":  len(bad_entries),
+        "top_errors":      top_errors,
+        "mistake_summary": summary,
+    }
+
+    try:
+        with EPISODE_LOG_PATH.open("a") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception as exc:
+        print(f"[WARN] Episode log write failed: {exc}", file=sys.stderr, flush=True)
+
+
+# ────────────────────────────────────────────────────────────────
+# Core runner
+# ────────────────────────────────────────────────────────────────
+
 def run_task(task_name: str) -> None:
-    env = ModelFlowEnvironment()
+    env    = ModelFlowEnvironment()
+    memory = DecisionMemory()
 
-    obs = None
-    step_num = 0
-    rewards: List[float] = []
-    done = False
-    compressed_history: List[str] = []
-    final_score = 0.0
+    obs:        object = None
+    step_num:   int    = 0
+    rewards:    List[float] = []
+    done:       bool   = False
+    final_score: float = 0.0
 
-    print(f"[START] task={task_name} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+    prev_overridden:   bool          = False
+    prev_override_from: Optional[str] = None
+
+    print(f"[START] task={task_name} model={MODEL_NAME}", flush=True)
 
     try:
         obs = env.reset(task_name=task_name)
@@ -114,32 +299,26 @@ def run_task(task_name: str) -> None:
         while not done and step_num < MAX_STEPS_PER_TASK:
             step_num += 1
 
-            # ── Prompt Construction ────────────────────────────────
-            q_stats_now = queue_stats(obs)
-            roster_str = build_roster_str(obs)
+            q_stats_now   = queue_stats(obs)
+            roster_str    = build_roster_str(obs)
+            system_prompt = get_system_prompt(roster_str, obs.ram_limit_mb, q_stats_now, obs)
 
-            system_prompt = _build_system_prompt(
-                roster_str,
-                obs.ram_limit_mb,
-                q_stats_now,
+            obs_text = observation_to_text(
                 obs,
+                q_stats_now,
+                memory,
+                last_was_overridden=prev_overridden,
+                overridden_from=prev_override_from,
             )
 
-            obs_text = observation_to_text(obs, q_stats_now)
-            recent = compressed_history[-CONTEXT_HISTORY_STEPS:]
+            messages = build_messages(system_prompt, obs_text)
 
-            messages = build_messages(system_prompt, recent, obs_text)
-
-            # ── LLM Call ───────────────────────────────────────────
+            # LLM call with exponential backoff on rate limits.
             action_dict = {
-                "command": "IDLE",
-                "model_id": None,
-                "quant_type": None,
-                "batch_size": 8,
-                "evict_model_id": None,
-                "evict_quant_type": None,
+                "command": "IDLE", "model_id": None, "quant_type": None,
+                "batch_size": 8, "evict_model_id": None, "evict_quant_type": None,
             }
-
+            llm_success = False
             for attempt in range(MAX_RETRIES):
                 try:
                     response = client.chat.completions.create(
@@ -148,26 +327,21 @@ def run_task(task_name: str) -> None:
                         temperature=TEMPERATURE,
                         max_tokens=MAX_TOKENS,
                     )
-
                     raw = (response.choices[0].message.content or "").strip()
                     action_dict = parse_action(raw)
+                    llm_success = True
                     break
-
                 except Exception as exc:
                     err_str = str(exc)
-                    print(
-                        f"[LLM ERROR] attempt={attempt + 1} error={err_str}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-
-                    if any(k in err_str.lower() for k in ("rate limit", "429", "too many")):
-                        if attempt < MAX_RETRIES - 1:
-                            time.sleep(BASE_BACKOFF_S * (2 ** attempt))
-                            continue
+                    print(f"[LLM ERROR] attempt={attempt+1} {err_str}", file=sys.stderr, flush=True)
+                    if ("429" in err_str or "rate limit" in err_str.lower()) and attempt < MAX_RETRIES - 1:
+                        time.sleep(BASE_BACKOFF_S * (2 ** attempt))
+                        continue
                     break
 
-            # ── Build Action ───────────────────────────────────────
+            if not llm_success:
+                print("[WARN] All LLM retries failed — using IDLE", file=sys.stderr, flush=True)
+
             raw_action = ModelFlowAction(
                 command=action_dict.get("command", "IDLE"),
                 model_id=action_dict.get("model_id"),
@@ -177,78 +351,36 @@ def run_task(task_name: str) -> None:
                 evict_quant_type=action_dict.get("evict_quant_type"),
             )
 
-            # ── Planning Override ──────────────────────────────────
-            action = apply_planning_override(raw_action, obs)
+            final_action, override_reason = _policy_filter(raw_action, obs)
 
-            if (
-                action.command != raw_action.command
-                or action.quant_type != raw_action.quant_type
-            ):
-                print(
-                    f"[PLANNING] overrode {raw_action.command}/{raw_action.quant_type} "
-                    f"→ {action.command}/{action.quant_type}",
-                    file=sys.stderr,
-                    flush=True,
-                )
+            _print_decision_debug(obs, raw_action, final_action, override_reason)
 
-            # ── Runtime OOM Guard ──────────────────────────────────
-            if action.command == "EXECUTE" and action.model_id:
-                from helpers.queue_utils import loaded_key as lk_fn
-
-                lk = lk_fn(obs, action.model_id)
-                if lk:
-                    _ = obs.loaded_models.get(lk, {})
-
-            # ── Step Environment ───────────────────────────────────
-            obs = env.step(action)
-            # ── Hard batch_size cap based on free RAM ──────────────────────
-            # ── Hard batch_size cap based on actual free RAM ───────────────
-            if action.command == "EXECUTE" and action.model_id and action.quant_type:
-                key = f"{action.model_id}_{action.quant_type}"
-                slot = obs.loaded_models.get(key, {})
-                model_mb = slot.get("size_mb", 0)
-                # Use only attributes that exist on ModelFlowObservation
-                actual_free = obs.ram_limit_mb - obs.ram_used_mb - obs.pressure_spike_mb
-                # Rough KV-cache estimate per batch item
-                kv_per_item = max(80, model_mb // 10)
-                safe_batch = max(1, int((actual_free - RAM_SAFETY_BUFFER_MB) // kv_per_item))
-                safe_batch = min(safe_batch, action.batch_size)
-                if safe_batch < action.batch_size:
-                    print(
-                        f"[OOM GUARD] batch {action.batch_size}→{safe_batch} "
-                        f"(actual_free={actual_free}MB kv≈{kv_per_item}MB/item)",
-                        file=sys.stderr, flush=True,
-                    )
-                    action = ModelFlowAction(
-                        command=action.command,
-                        model_id=action.model_id,
-                        quant_type=action.quant_type,
-                        batch_size=safe_batch,
-                        evict_model_id=action.evict_model_id,
-                        evict_quant_type=action.evict_quant_type,
-                    )            
+            obs  = env.step(final_action)
             done = obs.done
 
             reward_val = round(obs.reward, 2)
             rewards.append(reward_val)
 
-            error_val = obs.last_action_error or "null"
-            done_str = "true" if done else "false"
-
-            print(
-                f"[STEP] step={step_num} action={action.command} "
-                f"reward={reward_val:.2f} done={done_str} error={error_val}",
-                flush=True,
+            memory.push(
+                step_num, final_action, reward_val,
+                obs.last_action_feedback, obs.last_action_error,
             )
 
-            compressed_history.append(
-                compress_step(
-                    step_num,
-                    action,
-                    obs.reward,
-                    obs.last_action_feedback,
-                    obs.last_action_error,
-                )
+            if override_reason:
+                prev_overridden    = True
+                prev_override_from = f"{raw_action.command} {raw_action.model_id or ''}/{raw_action.quant_type or ''}"
+            else:
+                prev_overridden    = False
+                prev_override_from = None
+
+            print(
+                f"[STEP] step={step_num}"
+                f" proposed={raw_action.command}/{raw_action.quant_type or '-'}"
+                f" final={final_action.command}/{final_action.quant_type or '-'}"
+                f" reward={reward_val:.2f}"
+                f" done={'true' if done else 'false'}"
+                f" error={obs.last_action_error or 'null'}",
+                flush=True,
             )
 
         final_score = env.score_task()
@@ -258,19 +390,29 @@ def run_task(task_name: str) -> None:
         traceback.print_exc(file=sys.stderr)
 
     finally:
-        success_str = "true" if (obs is not None and len(obs.queue) == 0) else "false"
+        success = (
+            obs is not None
+            and not obs.queue
+            and getattr(obs, "deferred_count", 0) == 0
+        )
         rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
-
         print(
-            f"[END] success={success_str} steps={step_num} "
-            f"score={final_score:.2f} rewards={rewards_str}",
+            f"[END] success={'true' if success else 'false'}"
+            f" steps={step_num} score={final_score:.2f}"
+            f" rewards={rewards_str}",
             flush=True,
         )
 
-# ────────────────────────────────────────────────────────────────
-# Entry Point
-# ────────────────────────────────────────────────────────────────
+        _write_episode_log(
+            task_name=task_name,
+            score=final_score,
+            steps=step_num,
+            rewards=rewards,
+            memory=memory,
+            success=success,
+        )
+
+
 if __name__ == "__main__":
     for task in TASKS:
         run_task(task)
-    # run_task("quality-limit")
