@@ -200,7 +200,6 @@ def dispatch_tool_call(
     return json.dumps(result)
 
 
-# ── OpenAI / Groq tool schemas ────────────────────────────────────────────────
 
 TOOL_SCHEMAS = [
     {

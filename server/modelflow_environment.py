@@ -3,11 +3,11 @@ import os
 import random
 from typing import Dict, List
 
-from groq import Groq
 from openenv.core.env_server import Environment
 
-from models import ModelFlowObservation, RequestInfo, ModelFlowAction
-from server.constants import (
+# from models import ModelFlowObservation, RequestInfo, ModelFlowAction
+from model_flow.models import ModelFlowObservation, RequestInfo, ModelFlowAction
+from .constants import (
     ACTIVE_MODELS,
     COMPLEXITY_MIN_RANK,
     QUANT_TO_TIER,
@@ -16,8 +16,8 @@ from server.constants import (
     TIER_RANK,
     QUANTS,
 )
-from server.groq_helper import init_groq_client
-from server.metrics_loader import load_roster
+# from .groq_helper import init_groq_client
+from .metrics_loader import load_roster
 
 
 class ModelFlowEnvironment(Environment):
@@ -78,8 +78,8 @@ class ModelFlowEnvironment(Environment):
         self._initial_request_count: int = 0
         self._initial_reasoning_count: int = 0
 
-        self.groq_client = init_groq_client()
-        self.groq_model = "llama3-8b-8192"
+        # self.groq_client = init_groq_client()
+        # self.groq_model = "llama3-8b-8192"
 
         self.completion_ages: List[float] = []
         self.throughput_samples: List[float] = []

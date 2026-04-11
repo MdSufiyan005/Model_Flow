@@ -2,7 +2,7 @@ import json
 import os
 from typing import Dict
 
-from server.constants import ACTIVE_MODELS, QUANTS, QUANT_TO_TIER
+from .constants import ACTIVE_MODELS, QUANTS, QUANT_TO_TIER
 
 
 def load_roster(benchmark_json: str) -> Dict[str, dict]:
