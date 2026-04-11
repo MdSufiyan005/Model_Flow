@@ -13,33 +13,37 @@ tags:
   - openenv
   - modelflow
   - reinforcement-learning
-  - simulation
   - llm-ops
 
+
 tasks:
-  - id: single-load
+  - id: task1
     name: Single Load Test
     description: >
       9 identical chatbot/standard requests.
       Tests throughput under a single model type with no complexity variance.
+    grader: grade_single_load
 
-  - id: multi-load
+  - id: task2
     name: Multi Load
     description: >
       12 requests across all 3 roles (chatbot ×4, coder ×5, translator ×3).
       Escalates from standard to reasoning mid-sequence.
       Tests RAM packing across mixed model types with progressive load increase.
+    grader: grade_multi_load
 
-  - id: quality-limit
+  - id: task3
     name: Quality Limit
     description: >
       14 requests evenly spread across chatbot, coder, and translator.
       Reasoning requests interleaved throughout (5 of 14).
       Tests role-matching and quality-tier handling under a balanced mixed workload.
+    grader: grade_quality_limit
 
-  - id: ram-pressure
+  - id: task4
     name: RAM Pressure
     description: >
       12 requests split equally across all 3 roles (4 each).
       Half are reasoning complexity, clustered in the middle of the sequence.
       Tests OOM avoidance and safety margins under sustained high-RAM demand.
+    grader: grade_ram_pressure
