@@ -21,7 +21,7 @@ from typing import Dict, List, TYPE_CHECKING
 if TYPE_CHECKING:
     from models import ModelFlowObservation
 
-from config import SYSTEM_OVERHEAD_MB, REASONING_MIN_QUANT, REASONING_QUANTS
+from config import SYSTEM_OVERHEAD_MB, REASONING_MIN_QUANT, REASONING_QUANTS,RAM_SAFETY_BUFFER_MB
 
 
 # ── Roster string — built once, embedded in system prompt ───────────────────
@@ -97,21 +97,23 @@ def _loaded_summary(obs: "ModelFlowObservation") -> str:
 # ── RAM line ─────────────────────────────────────────────────────────────────
 
 def _ram_line(obs: "ModelFlowObservation") -> str:
+    spike = obs.pressure_spike_mb
     effective_free = max(0, int(
-        obs.ram_limit_mb - obs.ram_used_mb - obs.pressure_spike_mb - SYSTEM_OVERHEAD_MB
+        obs.ram_limit_mb - obs.ram_used_mb - spike - SYSTEM_OVERHEAD_MB
     ))
+    safe_threshold = RAM_SAFETY_BUFFER_MB  # import this from config
+    
     base = (
-        f"RAM: {obs.ram_used_mb}/{obs.ram_limit_mb}MB used  "
-        f"effective_free={effective_free}MB"
+        f"RAM: used={obs.ram_used_mb}MB / limit={obs.ram_limit_mb}MB | "
+        f"effective_free={effective_free}MB | "
+        f"safe_to_load_if_model_size < {effective_free - safe_threshold}MB"
     )
-    if obs.pressure_spike_mb > 0:
+    if spike > 0:
         base += (
-            f"  ⚠ SPIKE={obs.pressure_spike_mb}MB"
-            f" ({obs.spike_steps_remaining} steps left)"
-            f"  — reduce batch or wait out spike before EXECUTE"
+            f"\n⚠ ACTIVE SPIKE: +{spike}MB for {obs.spike_steps_remaining} more steps"
+            f" — use batch_size=1-2 or EVICT before EXECUTE"
         )
     return base
-
 
 # ── System prompt — sent once, static content only ───────────────────────────
 

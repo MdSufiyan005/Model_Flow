@@ -14,7 +14,7 @@ from openai import OpenAI
 # Environment / Config
 # ────────────────────────────────────────────────────────────────
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct:together")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 if HF_TOKEN is None:
@@ -57,39 +57,32 @@ from server.modelflow_environment import ModelFlowEnvironment
 # Rules
 # ────────────────────────────────────────────────────────────────
 _TIER_RULES = f"""
-=== HARD CONSTRAINTS — NEVER VIOLATE THESE ===
+=== DECISION RULES — FOLLOW IN ORDER EVERY STEP ===
 
-QUANT → TIER → RANK:
-Q4_K_M → low → rank 1 (simple requests ONLY)
-Q5_K_M → medium → rank 2 (simple requests ONLY)
-Q6_K → high → rank 3 (simple + reasoning ✓)
-Q8_0 → risky → rank 4 (simple + reasoning ✓)
+STEP 1 — READ THE QUEUE.
+  Identify: which model_id is needed, total count, and whether ANY requests are "reasoning".
 
-RULE 1 Any "reasoning" request requires Q6_K or Q8_0.
-Never LOAD Q4_K_M or Q5_K_M if that model has ANY reasoning requests queued.
-If the wrong (too-low) quant is already loaded, use REPLACE to upgrade.
+STEP 2 — PICK THE CORRECT QUANT.
+  - All requests are "standard" or "simple"  →  use Q4_K_M (smallest, cheapest)
+  - ANY request is "reasoning"               →  use Q6_K minimum
+  DO NOT upgrade quant unless reasoning requests are actually present.
+  DO NOT replace a model you just loaded this step.
 
-RULE 2 Prefer REPLACE over separate EVICT then LOAD — it saves a step.
+STEP 3 — CHECK RAM BEFORE EVERY LOAD OR EXECUTE.
+  effective_free = ram_limit_mb - ram_used_mb - pressure_spike_mb - {RAM_SAFETY_BUFFER_MB}
+  Only LOAD if: model_size_mb < effective_free
+  If spike is active: use batch_size = min(2, matching_queue_entries)
+  Otherwise:          use batch_size = min(8, matching_queue_entries)
 
-RULE 3 RAM guard: before LOAD, check ram_free_mb.
-Must satisfy: model_size_mb + {RAM_SAFETY_BUFFER_MB} <= ram_free_mb.
-If a pressure spike is active, also subtract pressure_spike_mb.
+STEP 4 — EXECUTE THE LOADED MODEL UNTIL ITS QUEUE IS EMPTY.
+  If the correct model is already loaded at a sufficient quant → go straight to EXECUTE.
+  Only REPLACE if a completely different role's model needs to be served next.
 
-RULE 4 Never IDLE when queue is non-empty and a model is loaded.
+STEP 5 — FINISH IN ≤8 STEPS.
+  single-load task = one model type only. Load once, execute until done. Never replace.
 
-RULE 5 Always set batch_size = min(8, queue_length).
-
-RULE 6 Finish in ≤8 steps if possible.
-
-OUTPUT — respond with ONLY a single JSON object:
-{{
-    "command": "LOAD | EXECUTE | EVICT | REPLACE | IDLE",
-    "model_id": "<model_id or null>",
-    "quant_type": "<Q4_K_M | Q5_K_M | Q6_K | Q8_0 or null>",
-    "batch_size": <1-8>,
-    "evict_model_id": "<model_id or null>",
-    "evict_quant_type": "<quant or null>"
-}}
+OUTPUT — ONE JSON object only, no markdown, no explanation:
+{{"command":"LOAD|EXECUTE|EVICT|REPLACE|IDLE","model_id":"...","quant_type":"...","batch_size":8,"evict_model_id":null,"evict_quant_type":null}}
 """
 
 # ────────────────────────────────────────────────────────────────
@@ -208,6 +201,32 @@ def run_task(task_name: str) -> None:
 
             # ── Step Environment ───────────────────────────────────
             obs = env.step(action)
+            # ── Hard batch_size cap based on free RAM ──────────────────────
+            # ── Hard batch_size cap based on actual free RAM ───────────────
+            if action.command == "EXECUTE" and action.model_id and action.quant_type:
+                key = f"{action.model_id}_{action.quant_type}"
+                slot = obs.loaded_models.get(key, {})
+                model_mb = slot.get("size_mb", 0)
+                # Use only attributes that exist on ModelFlowObservation
+                actual_free = obs.ram_limit_mb - obs.ram_used_mb - obs.pressure_spike_mb
+                # Rough KV-cache estimate per batch item
+                kv_per_item = max(80, model_mb // 10)
+                safe_batch = max(1, int((actual_free - RAM_SAFETY_BUFFER_MB) // kv_per_item))
+                safe_batch = min(safe_batch, action.batch_size)
+                if safe_batch < action.batch_size:
+                    print(
+                        f"[OOM GUARD] batch {action.batch_size}→{safe_batch} "
+                        f"(actual_free={actual_free}MB kv≈{kv_per_item}MB/item)",
+                        file=sys.stderr, flush=True,
+                    )
+                    action = ModelFlowAction(
+                        command=action.command,
+                        model_id=action.model_id,
+                        quant_type=action.quant_type,
+                        batch_size=safe_batch,
+                        evict_model_id=action.evict_model_id,
+                        evict_quant_type=action.evict_quant_type,
+                    )            
             done = obs.done
 
             reward_val = round(obs.reward, 2)

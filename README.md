@@ -173,9 +173,7 @@ uv sync
 # Environment Configuration
 # ==============================
 
-# Set to 1 → Use Groq for testing
-# Set to 0 → Use Hugging Face
-export USE_GROQ_ONLY=0 # DEFAULT USE_GROQ_ONLY=0
+
 
 # Common (Hugging Face)
 export API_BASE_URL="https://router.huggingface.co/v1"
