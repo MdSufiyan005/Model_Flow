@@ -1,6 +1,10 @@
 """
 modelflow_environment.py
 
+Main ModelFlow environment class.
+All core simulation logic, reset/step cycle, observation generation,
+and episode scoring remain here for maximum clarity and single-file
+maintainability of the primary agent-environment contract.
 """
 
 import math
@@ -14,10 +18,6 @@ from .constants import (
     ACTIVE_MODELS,
     COMPLEXITY_MIN_RANK,
     DEMAND_HINT_DELAY,
-    HEAT_BUCKET_LOW,
-    HEAT_BUCKET_MEDIUM,
-    HEAT_FAIL_CAP,
-    HEAT_FAIL_SLOPE,
     QUANT_TO_TIER,
     ROLE_TO_MODEL,
     SLA_BASE_STEPS,
@@ -31,6 +31,10 @@ from .constants import (
 from .metrics_loader import load_roster
 import model_flow.rewards as R
 
+# Import extracted helpers (clean separation of pure utility functions)
+from helpers.samplers import _sample_load_time_s, _sample_host_mb, _quality_failure
+from helpers.heat import _heat_bucket
+
 
 # ---------------------------------------------------------------------------
 # Tick caps — bound the internal simulation loops so the reward signal
@@ -40,49 +44,6 @@ import model_flow.rewards as R
 
 MAX_EXEC_TICKS = 8    # max internal clock ticks during a single EXECUTE
 MAX_LOAD_TICKS = 4    # max internal clock ticks during a single LOAD/REPLACE
-
-
-# ---------------------------------------------------------------------------
-# Stochastic samplers
-# ---------------------------------------------------------------------------
-
-def _sample_load_time_s(data: dict) -> float:
-    avg_ms = data["load_avg_ms"]
-    var_ms = data.get("load_var_ms", avg_ms * 0.15)
-
-    mu    = math.log(max(avg_ms, 1e-6))
-    sigma = math.sqrt(math.log(1.0 + var_ms / (avg_ms ** 2))) if avg_ms > 0 else 0.15
-    sigma = max(0.05, min(sigma, 0.6))
-
-    sampled_ms = math.exp(random.gauss(mu, sigma))
-
-    lo_ms, hi_ms = data.get("load_range_ms", (avg_ms * 0.3, avg_ms * 4.0))
-    sampled_ms   = max(lo_ms, min(hi_ms, sampled_ms))
-
-    return sampled_ms / 1000.0
-
-
-def _sample_host_mb(data: dict) -> float:
-    avg = data["host_mb"]
-    lo, hi = data.get("host_mb_range", (avg * 0.9, avg * 1.3))
-    return random.triangular(lo, hi, avg)
-
-
-def _quality_failure(model_heat: int) -> bool:
-    fail_prob = min(HEAT_FAIL_CAP, HEAT_FAIL_SLOPE * model_heat)
-    return random.random() >= fail_prob
-
-
-# ---------------------------------------------------------------------------
-# Heat bucket label
-# ---------------------------------------------------------------------------
-
-def _heat_bucket(heat: int) -> str:
-    if heat <= HEAT_BUCKET_LOW:
-        return "low"
-    if heat <= HEAT_BUCKET_MEDIUM:
-        return "medium"
-    return "high"
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +209,7 @@ class ModelFlowEnvironment():
         return self._get_observation()
 
     # -------------------------------------------------------------------------
-    # Internal helpers
+    # Internal helpers (kept inside the class for tight coupling to state)
     # -------------------------------------------------------------------------
 
     def _tick_spike(self):

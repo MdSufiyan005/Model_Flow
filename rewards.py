@@ -199,7 +199,6 @@ def defer_serve_bonus(waited_steps: int, quality_ok: bool) -> float:
 
 
 # Episode-terminal rewards
-
 def episode_success() -> float:
     return 50.0
 
