@@ -1,32 +1,6 @@
 """
-inference.py — ModelFlow V2
+inference.py — ModelFlow
 
-Changes in this version
-------------------------
-1. _extract_mistakes now receives the full rewards list (not just the
-   last-5 memory window) so bad steps aren't missed in long episodes.
-
-2. _write_episode_log computes mean_reward from the full rewards list
-   and includes quant_misuse detection: if an episode had many EXECUTE
-   actions but large negative rewards, the log flags "possible Q6K overuse
-   on standard queue" to help the next episode's lesson block.
-
-3. All other logic (policy filter, override pre-warning, episode logger,
-   retry loop) preserved from previous version.
-
-4. OUTPUT FORMAT FIXES (hackathon compliance):
-   - [START] now includes env=<benchmark> field.
-   - [STEP]  now uses action=<action_str> (was proposed=/final=).
-   - [END]   now includes score=<grader_score> for the completed task.
-             score= is the final grader result for that specific task.
-
-POLICY FILTER FIXES (v2.1):
-   - REPLACE targeting an already-loaded new model is redirected to EXECUTE,
-     preventing the infinite self-replace loop seen in ram-pressure.
-   - EXECUTE with a quant not matching any loaded slot for that model is
-     redirected to EXECUTE with the actually-loaded quant (or IDLE if none).
-   - REPLACE where evict_key == new_key (evicting and reloading the same
-     model+quant) is blocked and redirected to EXECUTE if loaded, else IDLE.
 """
 
 import dataclasses
@@ -59,28 +33,35 @@ from config import (
 # Backend config
 # ---------------------------------------------------------------------------
 
-USE_GROQ     = os.getenv("GROQ", "0") == "1"
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# USE_GROQ     = os.getenv("GROQ", "0") == "1"
+# GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN     = os.getenv("HF_TOKEN")
 
-if USE_GROQ:
-    if not GROQ_API_KEY:
-        raise ValueError("GROQ_API_KEY is required when GROQ=1")
-    print("[INFO] Using Groq backend", flush=True)
-    client = OpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=GROQ_API_KEY,
-        timeout=30.0,
-    )
-    if MODEL_NAME == "Qwen/Qwen2.5-72B-Instruct":
-        MODEL_NAME = "llama-3.3-70b-versatile"
-else:
-    if HF_TOKEN is None:
-        raise ValueError("HF_TOKEN environment variable is required")
-    print("[INFO] Using HuggingFace router backend", flush=True)
-    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN, timeout=30.0)
+# if USE_GROQ:
+#     if not GROQ_API_KEY:
+#         raise ValueError("GROQ_API_KEY is required when GROQ=1")
+#     print("[INFO] Using Groq backend", flush=True)
+#     client = OpenAI(
+#         base_url="https://api.groq.com/openai/v1",
+#         api_key=GROQ_API_KEY,
+#         timeout=30.0,
+#     )
+#     if MODEL_NAME == "Qwen/Qwen2.5-72B-Instruct":
+#         MODEL_NAME = "llama-3.3-70b-versatile"
+# else:
+#     if HF_TOKEN is None:
+#         raise ValueError("HF_TOKEN environment variable is required")
+#     print("[INFO] Using HuggingFace router backend", flush=True)
+#     client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN, timeout=30.0)
+
+if HF_TOKEN is None:
+    raise ValueError("HF_TOKEN environment variable is required")
+print("[INFO] Using HuggingFace router backend", flush=True)
+
+client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN, timeout=30.0)
+
 
 EPISODE_LOG_PATH = Path(os.getenv("EPISODE_LOG_PATH", "episode_log.jsonl"))
 
@@ -572,6 +553,5 @@ def run_task(task_name: str) -> None:
 
 
 if __name__ == "__main__":
-    # for task in TASKS:
-    #     run_task(task)
-    run_task('ram-pressure')
+    for task in TASKS:
+        run_task(task)
