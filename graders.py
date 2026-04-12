@@ -20,8 +20,6 @@ class EpisodeResult:
     completion_ages: List[float] = field(default_factory=list)
     throughput_samples: List[float] = field(default_factory=list)
     overprovision_count: int = 0
-
-    # ── V2 additions ──────────────────────────────────────────────────────────
     # Number of EXECUTE calls where heat caused a quality failure.
     quality_failures: int = 0
     # Deferred requests that were eventually served (DEFER was strategic).
@@ -34,9 +32,7 @@ class EpisodeResult:
     # (completion_ages already exists; sla_at_serve is the threshold at that moment)
 
 
-# ---------------------------------------------------------------------------
 # Sub-score helpers
-# ---------------------------------------------------------------------------
 
 def _latency_score(ages: List[float], sla_windows: List[int] = None) -> float:
     """
@@ -100,9 +96,7 @@ def _defer_efficiency_score(deferred_served: int, deferred_abandoned: int) -> fl
     return deferred_served / total_deferred
 
 
-# ---------------------------------------------------------------------------
 # Individual graders
-# ---------------------------------------------------------------------------
 
 def grade_single_load(result: EpisodeResult) -> float:
     """
@@ -239,9 +233,8 @@ def grade_ram_pressure(result: EpisodeResult) -> float:
     return _clamp(score)
 
 
-# ---------------------------------------------------------------------------
+
 # Utilities
-# ---------------------------------------------------------------------------
 
 def _clamp(score: float) -> float:
     return round(min(0.99, max(0.01, score)), 2)

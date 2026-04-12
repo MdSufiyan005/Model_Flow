@@ -1,9 +1,6 @@
 """
 config.py — shared constants.
 
-The OpenAI client lives in inference.py (hackathon requirement).
-llm_utils.py imports active_model / TEMPERATURE / MAX_TOKENS from here,
-but gets the client passed in or imported from inference.py.
 """
 
 import os
@@ -37,14 +34,14 @@ SYSTEM_OVERHEAD_MB    = 1100
 # During ram-pressure tasks spikes can reach 2 500 MB — leave room.
 RAM_SAFETY_BUFFER_MB = 1600
 
-# ── Role → model mapping ─────────────────────────────────────────────────────
+# model mapping
 ROLE_TO_MODEL: Dict[str, str] = {
     "chatbot":    "gemma-3-4b",
     "translator": "llama_1b",
     "coder":      "qwen3.5-2b",
 }
 
-# ── Quantisation constants ────────────────────────────────────────────────────
+# Quantisation constants
 QUANT_TIER: Dict[str, str] = {
     "Q4_K_M": "low",
     "Q5_K_M": "medium",

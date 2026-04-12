@@ -48,7 +48,7 @@ class ModelFlowObservation(BaseModel):
     pressure_spike_mb: int = 0
     spike_steps_remaining: int = 0
 
-    # ── V2: partial-observability signals ─────────────────────────────────────
+    # partial-observability signals
     # Bucketed heat per loaded model key: "low" | "medium" | "high"
     # Agent sees category, NOT the raw integer heat count.
     model_heat_signals: Dict[str, str] = Field(default_factory=dict)

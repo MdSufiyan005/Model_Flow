@@ -8,210 +8,140 @@ app_port: 8000
 pinned: false
 ---
 
-# ModelFlow LLM Orchestrator ⚙️
+# ModelFlow ⚙️
 
-ModelFlow simulates a real-world LLM inference server operating under strict RAM constraints. It processes a stream of incoming requests that require different models, quantization levels, and compute resources.
+ModelFlow is a benchmark where an AI agent acts as an LLM inference scheduler. The agent manages a constrained RAM environment — loading, executing, and evicting models to serve a stream of incoming requests as efficiently as possible.
 
-An AI agent acts as an infrastructure orchestrator, responsible for:
+**Live demo:** [huggingface.co/spaces/MdSufiyan005/modelflow](https://huggingface.co/spaces/MdSufiyan005/modelflow)
 
-Managing limited RAM capacity
-Loading and evicting models efficiently
-Selecting optimal quantization tiers
-Handling CPU contention and execution delays
-
-The objective is to clear the request queue accurately and efficiently while:
-
-Avoiding Out-Of-Memory (OOM) errors
-Minimizing latency and time penalties
-Maximizing overall system performance
-
-## Table of Contents
-- [Manual UI Interaction](#manual-ui-interaction)
-- [Images](#images)
-  - [Dashboard 1](#dashboard-1)
-  - [Dashboard 2](#dashboard-2)
-  - [Terminal Output](#terminal-output)
-- [How It Works](#how-it-works)
-- [Tasks](#tasks)
-- [Project Structure](#project-structure)
-- [Quick Setup](#quick-setup)
-- [Dataset & Baseline](#dataset--baseline)
-
-
-## Manual UI Interaction
-https://huggingface.co/spaces/MdSufiyan005/modelflow
-
-## Images
-
-### Dashboard 
-![Dashboard 1](Images/dash1.png)
-![Dashboard 2](Images/dash2.png)
-
-### Terminal Output
-![Terminal Output](Images/Terminal-Output_.png)
-
+---
 
 ## How It Works
 
-**Environment provides:**
-- Current RAM usage
-- Pending request queue
-- Loaded models
-- Available model/quantization options
-- Action feedback
+Each episode, the agent receives an observation of the current system state and decides what action to take. The goal is to clear the request queue with minimal latency, zero OOM errors, and smart model reuse.
 
-**Agent actions:**
-- `LOAD(model_id, quant_type)` → Load model into RAM
-- `EXECUTE(model_id, quant_type, batch_size)` → Process queued requests
-- `EVICT(model_id, quant_type)` → Remove model from memory
-- `REPLACE(model_id1, quant1, model_id2, quant2)` → Swap models
-- `IDLE` → Do nothing for one step
+### Agent Actions
 
-**Observation (General):**
-```
-💾 Memory
+| Action | Description |
+|---|---|
+| `LOAD(model_id, quant_type)` | Load a model into RAM |
+| `EXECUTE(model_id, quant_type, batch_size)` | Process matching queued requests |
+| `EVICT(model_id, quant_type)` | Free RAM by unloading a model |
+| `REPLACE(evict_model, load_model)` | Swap one model for another in a single step |
+| `DEFER(model_type)` | Move a request to a deferred sub-queue to serve later |
+| `IDLE` | Do nothing (penalised — last resort) |
 
-* ram_used_mb → used RAM
-* ram_limit_mb → total RAM
-* ram_free_mb → free RAM
-* pressure_spike_mb` → temporary spike
-* spike_steps_remaining → spike duration
+### Quantization Tiers
 
-⚙️ System
+Quant level determines model quality and RAM cost. Reasoning requests require `Q6_K` or higher.
 
-* loaded_models → currently loaded models
-* queue → pending requests
-* model_summary → available models info
-* available_model_types → chatbot / translator / coder
+| Quant | Tier | Use for |
+|---|---|---|
+| `Q4_K_M` | low | Standard requests only |
+| `Q5_K_M` | medium | Standard requests |
+| `Q6_K` | high | Standard + reasoning |
+| `Q8_0` | risky | Standard + reasoning (highest quality, most RAM) |
 
-📊 State
-
-* last_action_feedback → result of last action
-* last_action_error → last error
-* step_count → current step
-* done → episode finished
-
-📈 Performance
-
-* info → metrics (reward, completed, pending, loads, evicts, etc.)
-* reward → current reward
-
-```
-***
+---
 
 ## Tasks
-1. **Single Load (Easy)**:
-A small batch of 9 simple, similar chatbot requests. This tests whether the agent can keep one model loaded and reuse it efficiently, without constantly reloading or swapping models unnecessarily.
 
-2. **Multi Load (Medium)**:
-A mix of 12 requests across chatbot, coder, and translator models, including both standard and reasoning tasks. This checks how well the agent chooses the right model on the fly and switches between them while balancing speed and memory.
+Four tasks of increasing difficulty, each scored independently.
 
-2. **Quality Limit (Hard)**:
-A set of 14 mixed requests, with more reasoning‑heavy tasks. The agent must pick stronger models for complex questions while still watching resource limits, testing its ability to make quality‑aware decisions under pressure.
+| Task | Difficulty | Description |
+|---|---|---|
+| **Single Load** | Easy | 9 identical chatbot requests — tests efficient model reuse |
+| **Multi Load** | Medium | 12 mixed requests across 3 models — tests quant selection and demand adaptation |
+| **Quality Limit** | Hard | 14 requests with tightening SLA — tests heat management and quality-aware scheduling |
+| **RAM Pressure** | Extreme | 12 reasoning-heavy requests with RAM spikes and demand shifts — tests OOM avoidance under compound pressure |
 
-3. **RAM Pressure (Hard+)**:
-12 complex requests, with frequent reasoning demands under tight memory conditions. This pushes the agent to the limit in managing RAM loading, unloading, and evicting models smartly without triggering out‑of‑memory errors (OOM).
+### Baseline Scores (LLaMA 3.3 70B via Groq)
 
-***
+| Task | Score |
+|---|---|
+| Single Load | 0.88 |
+| Multi Load | 0.64 |
+| Quality Limit | 0.69 |
+| RAM Pressure | 0.54 |
 
-## 📁 Project Structure
+---
 
-```
-model_flow/
-│
-├── inference.py          → Main execution loop (LLM decision-making + env interaction)
-├── client.py            
-├── config.py             → Global configuration (models, API settings, retries)
-├── graders.py            → Evaluation and scoring logic for benchmarking
-├── models.py             → Shared data classes (actions, observations, request schema)
-├── prompt.py             → Builds prompts and formats environment state for LLM
-├── README.md             → Project documentation
-├── requirements.txt      → Python dependencies
-├── Dockerfile            → Container setup for deployment
-├── pyproject.toml        → Project metadata and build configuration
-├── openenv.yaml          → Environment configuration (OpenEnv setup)
-│
-├── Data/
-│   └── combined_model_metrics.json  → Model performance stats (RAM, latency, throughput)
-│
-├── helpers/
-│   ├── context_utils.py     → Context/window management for LLM inputs
-│   ├── llm_utils.py         → LLM API calls, retries, response handling
-│   ├── model_utils.py       → Model size, quantization, load feasibility logic
-│   ├── planning.py          → Safety layer (overrides bad actions, constraints)
-│   ├── queue_utils.py       → Queue analysis (pending requests, workload)
-│   ├── tools.py             → Core simulation utilities (memory checks, execution)
-│   └── visualization.py     → Debugging and terminal visualization tools
-│
-├── server/
-│   ├── app.py                  → FastAPI server (API endpoints + backend)
-│   ├── constants.py            → System constants (quant levels, limits)
-│   ├── metrics_loader.py       → Loads and processes model metrics dataset
-│   └── modelflow_environment.py → Core simulation engine (step, reset, rewards)
-│
-├── scripts/
-│   ├── dashboard.html  → Base HTML for frontend dashboard
-│   ├── app.jsx         → Main React app component
-│   ├── core.jsx        → Core dashboard logic
-│   ├── index.jsx       → Entry point for React app
-│   └── ui.jsx          → UI components and layout
-```
-***
+## Dashboard
+
+![Dashboard 1](Images/dash1.png)
+![Dashboard 2](Images/dash2.png)
+![Terminal Output](Images/Terminal-Output_.png)
+
+---
+
 ## Quick Setup
 
 ### Local
+
 ```bash
-# Create virtual environment using uv
-uv venv
-source .venv/bin/activate
-
-# Install dependencies
+uv venv && source .venv/bin/activate
 uv sync
-
-# ==============================
-# Environment Configuration
-# ==============================
 
 export API_BASE_URL="https://router.huggingface.co/v1"
 export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
-export HF_TOKEN="your_huggingface_token_here"
+export HF_TOKEN="your_token_here"
 
-
-# ==============================
-# Run
-# ==============================
-
-# Run inference script for agent interaction
-python inference.py
-
-# Start server for UI Dashboard or to access endpoints
-python -m uvicorn server.app:app --port 8000 
+python inference.py                                    # run the agent
+python -m uvicorn server.app:app --port 8000           # start the dashboard
 ```
 
 ### Docker
+
 ```bash
 docker build -t modelflow -f Dockerfile .
 docker run -d -p 8000:8000 modelflow
 ```
 
-**Access:**
-- Dashboard: `http://localhost:8000/`
-- API Docs: `http://localhost:8000/docs`
+**Dashboard:** `http://localhost:8000/` · **API docs:** `http://localhost:8000/docs`
 
-***
+---
 
-## Dataset & Baseline
+## Project Structure
 
-**Dataset:** `Data/combined_model_metrics.json`  
-**Profiled on:** Intel i3 laptop (8GB RAM)  
-**Source:** [Benchmarking repo](https://github.com/MdSufiyan005/BenchMarking)
+```text
+model_flow/
+├── inference.py                 # Main agent loop, LLM calls, action parsing, logging
+├── prompt.py                    # Builds prompts from environment observations
+├── graders.py                   # Task scoring and evaluation logic
+├── models.py                    # Shared data models and types
+├── rewards.py                   # Reward calculation logic
+├── config.py                    # Configuration, API settings, constants
+├── openenv.yaml                 # OpenEnv configuration (environment setup)
+├── Dockerfile                   # Containerization setup for deployment
+├── requirements.txt             # Python dependencies
+├── README.md                    # Project documentation
+│
+├── server/
+│   ├── modelflow_environment.py # Core simulation environment (RAM, queue, rewards)
+│   ├── app.py                   # FastAPI backend server
+│   ├── metrics_loader.py        # Loads benchmark/model metrics
+│   └── constants.py             # Quant tiers, SLA values, task definitions
+│
+├── helpers/                     # Core utility modules
+│   ├── queue_utils.py           # Queue handling and scheduling utilities
+│
+├── Data/
+│   └── combined_model_metrics.json  # Benchmark dataset (RAM, latency, quality)
+│
+├── scripts/                     # Frontend (React dashboard)
+│   ├── dashboard.html
+│   ├── app.jsx
+│   ├── index.jsx
+│   ├── core.jsx
+│   └── ui.jsx
+│
+└── Images/                      # Screenshots / UI previews
+```
 
-**Baseline Scores (Agent: GROQ API – LLaMA 3.3 70B Versatile):**
-| Task          | Score |
-| ------------- | ----- |
-| Single Load   | 0.88  |
-| Multi Load    | 0.64  |
-| Quality Limit | 0.69  |
-| RAM Pressure  | 0.54  |
 
+---
 
+## Dataset
+
+Model metrics profiled on an Intel i3 laptop (8 GB RAM).  
+Source: [github.com/MdSufiyan005/BenchMarking](https://github.com/MdSufiyan005/BenchMarking)

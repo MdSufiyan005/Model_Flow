@@ -19,7 +19,7 @@ ROLE_TO_MODEL: Dict[str, str] = {
     "coder":      "qwen3.5-2b",
 }
 
-# ── V2: SLA / non-stationarity constants ──────────────────────────────────────
+# SLA / non-stationarity constants 
 
 # Base SLA window (steps). A request served with age_steps > this is "late".
 SLA_BASE_STEPS: int = 40
@@ -62,13 +62,13 @@ REASONING_QUANT_PENALTY: Dict[str, float] = {
     "Q8_0":   0.00,
 }
 
-# ── V2: Model heat decay ──────────────────────────────────────────────────────
+# Model heat decay 
 # Probability of a quality failure = min(HEAT_FAIL_SLOPE * heat, HEAT_FAIL_CAP)
 # heat = number of times this (model, quant) key has been loaded since episode start.
 HEAT_FAIL_SLOPE: float = 0.07   # +7% failure probability per load
 HEAT_FAIL_CAP:   float = 0.55   # never exceeds 55% failure probability
 
-# ── Tasks ─────────────────────────────────────────────────────────────────────
+# Tasks
 TASKS = {
     "single-load": {
         "requests": [{"model_type": "chatbot", "complexity": "standard"}] * 9,

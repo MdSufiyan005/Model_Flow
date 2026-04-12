@@ -1,36 +1,6 @@
 """
-modelflow_environment.py — ModelFlow V2 Environment
+modelflow_environment.py
 
-Changes in this version
-------------------------
-1. EXECUTE internal clock-loop cap (PRIMARY FIX):
-   After a successful batch, the environment fires (_exec_steps - 1) extra
-   _clock_tick() calls to simulate inference time passing. With a slow model
-   (low gen_tps) and large batches, total_time_s can be 40–200 seconds,
-   producing 40–200 extra ticks. Each tick ages every pending request and
-   charges clock_tick_penalty() on all of them. Even with the fixed reward
-   coefficients in rewards.py, this still produces enormous negative rewards
-   for correct behavior (agent does LOAD → EXECUTE, gets -300 to -1000).
-
-   Fix: cap exec_steps at MAX_EXEC_TICKS = 8. This is not claiming inference
-   takes ≤8 seconds in reality — it means the scheduler agent's decision
-   granularity is limited to 8 steps per action. The real throughput and
-   contention are still accurately computed; only the number of age-penalty
-   ticks is bounded. This makes the reward landscape learnable.
-
-   The actual inference time (total_time_s) is still computed correctly and
-   reported in last_feedback, so the LLM still has accurate throughput info.
-
-2. REPLACE internal clock-loop cap: same reasoning, capped at MAX_LOAD_TICKS.
-
-3. LOAD internal clock-loop cap: same reasoning, capped at MAX_LOAD_TICKS.
-
-4. exec_steps and total_time_s now exposed in feedback string so LLM can
-   understand why reward was reduced (heat/contention visible).
-
-5. cumulative_reward lives on self only, never on obs (crash fix from V2).
-
-6. deferred_count explicitly set on obs (correctness fix from V2).
 """
 
 import math
@@ -38,7 +8,6 @@ import os
 import random
 from typing import Dict, List, Optional
 from pathlib import Path
-from openenv.core.env_server import Environment
 
 from model_flow.models import ModelFlowObservation, RequestInfo, ModelFlowAction
 from .constants import (
@@ -119,8 +88,7 @@ def _heat_bucket(heat: int) -> str:
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
-
-class ModelFlowEnvironment(Environment):
+class ModelFlowEnvironment():
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
     def __init__(self, benchmark_json: str | None = None):
@@ -375,7 +343,7 @@ class ModelFlowEnvironment(Environment):
                 req.age_steps += 1
             reward += R.clock_tick_penalty(self.queue, self.loaded_models)
 
-        # ── LOAD ────────────────────────────────────────────────────────────
+        # LOAD 
         if action.command == "LOAD":
             _clock_tick()
             if not action.model_id or not action.quant_type:
@@ -412,7 +380,7 @@ class ModelFlowEnvironment(Environment):
                         else:
                             actual_load_s = _sample_load_time_s(data)
 
-                        # ── TICK CAP for load time ──────────────────────────
+                        # TICK CAP for load time 
                         # Compute raw ticks but cap at MAX_LOAD_TICKS.
                         raw_load_ticks = max(1, math.ceil(actual_load_s))
                         load_ticks     = min(raw_load_ticks, MAX_LOAD_TICKS)
@@ -444,7 +412,7 @@ class ModelFlowEnvironment(Environment):
                             f" (ticks_used={load_ticks}/{raw_load_ticks})."
                         )
 
-        # ── EXECUTE ─────────────────────────────────────────────────────────
+        # EXECUTE
         elif action.command == "EXECUTE":
             _clock_tick()
             if not action.model_id or not action.quant_type:
@@ -569,7 +537,7 @@ class ModelFlowEnvironment(Environment):
                             g_tok        = sum(r.gen_tokens for r in matching) / math.sqrt(batch)
                             total_time_s = (p_tok / slot["prompt_tps"]) + (g_tok / eff_gen_tps)
 
-                            # ── TICK CAP for exec time ──────────────────────
+                            # TICK CAP for exec time
                             # Compute raw ticks but cap at MAX_EXEC_TICKS.
                             # total_time_s is still accurate and reported in
                             # feedback — only the age-penalty ticks are capped.
@@ -585,7 +553,7 @@ class ModelFlowEnvironment(Environment):
                                 f" contention={contention:.1%})."
                             )
 
-        # ── EVICT ───────────────────────────────────────────────────────────
+        # EVICT
         elif action.command == "EVICT":
             _clock_tick()
             if action.model_id and action.quant_type:
@@ -609,7 +577,7 @@ class ModelFlowEnvironment(Environment):
                 self.last_error = f"Cannot evict {key or 'nothing'}"
                 reward += R.evict_nothing_to_evict()
 
-        # ── IDLE ────────────────────────────────────────────────────────────
+        # IDLE
         elif action.command == "IDLE":
             _clock_tick()
             reward += R.idle_penalty()
@@ -617,7 +585,7 @@ class ModelFlowEnvironment(Environment):
                 self.idle_steps += 1
             self.last_feedback = "Idled."
 
-        # ── REPLACE ─────────────────────────────────────────────────────────
+        # REPLACE
         elif action.command == "REPLACE":
             evict_key = None
             if action.evict_model_id and action.evict_quant_type:
@@ -670,7 +638,7 @@ class ModelFlowEnvironment(Environment):
                             else:
                                 actual_load_s = _sample_load_time_s(new_data)
 
-                            # ── TICK CAP for replace load time ──────────────
+                            # TICK CAP for replace load time
                             raw_load_ticks = max(1, math.ceil(actual_load_s))
                             load_ticks     = min(raw_load_ticks, MAX_LOAD_TICKS)
                             for _ in range(load_ticks - 1):
@@ -707,7 +675,7 @@ class ModelFlowEnvironment(Environment):
                 self.last_error = f"Cannot replace {evict_key or 'nothing'}"
                 reward += R.replace_no_target()
 
-        # ── DEFER ───────────────────────────────────────────────────────────
+        # DEFER
         elif action.command == "DEFER":
             _clock_tick()
             if not self.queue:
@@ -736,7 +704,7 @@ class ModelFlowEnvironment(Environment):
                     f" Deferred queue: {len(self._deferred)}."
                 )
 
-        # ── Episode terminal conditions ──────────────────────────────────────
+        # Episode terminal conditions
         all_done = not self.queue and not self._deferred
         if all_done:
             done = True
@@ -756,10 +724,8 @@ class ModelFlowEnvironment(Environment):
         obs.reward = reward
         return obs
 
-    # -------------------------------------------------------------------------
-    # _get_observation
-    # -------------------------------------------------------------------------
 
+    # _get_observation
     def _get_observation(self) -> ModelFlowObservation:
         model_summary = {}
         for role, model_id in self.role_to_model.items():
@@ -829,9 +795,7 @@ class ModelFlowEnvironment(Environment):
             reward=0.0,
         )
 
-    # -------------------------------------------------------------------------
     # state / scoring
-    # -------------------------------------------------------------------------
 
     def state(self):
         return {

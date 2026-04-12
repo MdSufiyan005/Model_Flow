@@ -1,30 +1,23 @@
 """
-prompt.py — ModelFlow V2
+prompt.py
 
 Changes in this version
 ------------------------
-1. Quant selection made EXPLICIT in hints:
-   Previous version said "best_quant=Q4_K_M" but the decision tree still
-   said "reasoning needs Q6_K or higher" without specifying when to use Q4_K_M.
-   The LLM resolved the ambiguity by always using Q6_K "to be safe".
-   Fix: the hints block now states the EXACT recommended quant per model
-   based on the actual queue mix for that model, and the decision tree
-   explicitly says "use Q4_K_M for standard-only queues".
+1. EXEC_SAFETY_BUFFER_MB (2000 MB) added.
+   After loading a model the remaining free RAM must be >= this value to
+   guarantee execution + worst-case spike won't cause a RUNTIME OOM.
+   quality-limit and ram-pressure tasks have SPIKE_MB_MAX=2500 and only
+   6200 MB total — Q6_K on gemma-3-4b leaves only ~1700 MB post-load,
+   which is below the buffer, causing the EXECUTE → RUNTIME OOM loop.
 
-2. gen_tps and host_mb exposed in hints so the LLM can reason about
-   the speed/RAM tradeoff. The tick cap (MAX_EXEC_TICKS=8) means the
-   agent no longer needs to fear slow models — but it should still prefer
-   faster ones when the queue is large and aging.
+2. _per_model_hints now computes two new fields per model:
+     exec_safe   — True if post-load headroom >= EXEC_SAFETY_BUFFER_MB
+     safe_quant  — smallest available quant that IS exec-safe
+                   (equals rec_quant when exec_safe=True)
 
-3. Recommended_quant field added to hints: a single string the LLM should
-   copy directly into its JSON output. This eliminates the ambiguity of
-   "best_quant" (which was advisory) vs "required_quant" (hard rule).
-
-4. System prompt decision tree updated: Step 3 now explicitly says which
-   quant to use based on queue complexity, with Q4_K_M as the default.
-
-5. Cross-episode lessons, override pre-warning, loop detector, memory
-   block all preserved from previous version.
+3. System prompt STEP 3 and a new RUNTIME OOM RECOVERY block now use
+   these fields so the agent falls back to Q4_K_M automatically when
+   the recommended quant would cause a runtime OOM.
 """
 
 from __future__ import annotations
@@ -50,6 +43,12 @@ _COMPLEXITY_MIN_RANK: Dict[str, int] = {"standard": 0, "reasoning": 2}
 
 EPISODE_LOG_PATH       = Path(os.getenv("EPISODE_LOG_PATH", "episode_log.jsonl"))
 _EPISODE_LESSONS_COUNT = 3
+
+# After loading a model, remaining free RAM must be at least this much so
+# that execution context + KV cache + worst-case spike fits comfortably.
+# quality-limit spikes can reach 2500 MB on 6200 MB hardware, so 2000 MB
+# headroom is the safe floor.
+EXEC_SAFETY_BUFFER_MB = 2000
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +112,7 @@ def _memory_block(memory: Optional["DecisionMemory"]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Per-model hints — now includes recommended_quant and gen_tps
+# Per-model hints — recommended_quant, exec_safe, safe_quant
 # ---------------------------------------------------------------------------
 
 def _recommended_quant(needs_rsn: bool, quants_available: List[str]) -> str:
@@ -121,28 +120,62 @@ def _recommended_quant(needs_rsn: bool, quants_available: List[str]) -> str:
     Return the single best quant to use for this model given the request mix.
 
     Rule:
-      - Any reasoning request present → need tier=high → use REASONING_MIN_QUANT
-        (Q6_K) or higher if available.
-      - Standard only → use Q4_K_M (or the lowest available quant that is
-        at least medium tier, i.e. Q4_K_M). Never waste Q6_K on std-only.
-
-    The returned string is the EXACT value to put in quant_type JSON field.
+      - Any reasoning request present → need tier=high → use Q6_K or higher.
+      - Standard only → use Q4_K_M. Never waste Q6_K on std-only.
     """
     if not quants_available:
         return "Q4_K_M"
 
     if needs_rsn:
-        # Prefer Q6_K; fall back to highest available that qualifies.
         for q in ["Q6_K", "Q8_0"]:
             if q in quants_available:
                 return q
-        # No Q6_K available — return highest available and flag the issue.
         return sorted(quants_available)[-1]
     else:
-        # Standard only: use Q4_K_M. If not available, use lowest available.
         if "Q4_K_M" in quants_available:
             return "Q4_K_M"
         return sorted(quants_available)[0]
+
+
+def _safe_quant(
+    mid:              str,
+    quants_available: List[str],
+    obs:              "ModelFlowObservation",
+    free_mb:          float,
+) -> tuple:
+    """
+    Find the largest quant whose post-load headroom >= EXEC_SAFETY_BUFFER_MB.
+
+    Returns (safe_quant_str, safe_size_mb, exec_safe_for_rec).
+    exec_safe_for_rec = True when the recommended quant itself is safe.
+    """
+    # Build size map for this model from model_summary.
+    size_map: Dict[str, int] = {}
+    for info in obs.model_summary.values():
+        if info["model_id"] == mid:
+            for q, s in info["stats"].items():
+                size_map[q] = s.get("size_mb", 0)
+
+    # Check quants from highest to lowest quality until one fits.
+    quality_order = ["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M"]
+    chosen_quant   = quants_available[0] if quants_available else "Q4_K_M"
+    chosen_size    = size_map.get(chosen_quant, 0)
+
+    for q in quality_order:
+        if q not in quants_available:
+            continue
+        sz = size_map.get(q, 0)
+        if (free_mb - sz) >= EXEC_SAFETY_BUFFER_MB:
+            chosen_quant = q
+            chosen_size  = sz
+            break
+
+    # Is the recommended quant (Q6_K when reasoning present) itself exec-safe?
+    rec = _recommended_quant(
+        any(True for _ in []),   # placeholder; caller passes rec separately
+        quants_available,
+    )
+    return chosen_quant, chosen_size
 
 
 def _per_model_hints(obs: "ModelFlowObservation") -> str:
@@ -150,10 +183,12 @@ def _per_model_hints(obs: "ModelFlowObservation") -> str:
     Scheduling hints per model with pending requests.
 
     Key fields:
-      recommended_quant  — exact quant_type string to use in your JSON
+      recommended_quant  — best quant for quality (Q6_K if reasoning present)
+      safe_quant         — largest quant guaranteed not to cause RUNTIME OOM
+      exec_safe          — True when recommended_quant == safe_quant
       servable           — how many requests the currently loaded slot can serve
       est_net_gain       — rough estimate (actual reward differs by heat/SLA/quality)
-      gen_tps            — generation speed; faster = fewer internal penalty ticks
+      gen_tps            — generation speed
     """
     role_to_model = {r: info["model_id"] for r, info in obs.model_summary.items()}
     free_mb = max(
@@ -174,8 +209,8 @@ def _per_model_hints(obs: "ModelFlowObservation") -> str:
     lines = [
         "HINTS (est_net_gain is approximate — actual reward varies with heat/SLA/quality):"
     ]
-    best_model:     Optional[str] = None
-    best_gain:      float         = -9999.0
+    best_model: Optional[str] = None
+    best_gain:  float         = -9999.0
 
     for mid, reqs in sorted(pending.items()):
         needs_rsn = any(r.complexity == "reasoning" for r in reqs)
@@ -183,7 +218,6 @@ def _per_model_hints(obs: "ModelFlowObservation") -> str:
         std_c     = sum(1 for r in reqs if r.complexity != "reasoning")
         rsn_c     = len(reqs) - std_c
 
-        # Gather quants available for this model from the roster.
         quants_available = sorted(
             q for role, info in obs.model_summary.items()
             if info["model_id"] == mid
@@ -191,24 +225,49 @@ def _per_model_hints(obs: "ModelFlowObservation") -> str:
         )
         rec_quant = _recommended_quant(needs_rsn, quants_available)
 
-        # gen_tps for the recommended quant (so LLM knows speed).
+        # Build size map for this model.
+        size_map: Dict[str, int] = {}
+        for info in obs.model_summary.values():
+            if info["model_id"] == mid:
+                for q, s in info["stats"].items():
+                    size_map[q] = s.get("size_mb", 0)
+
+        rec_size_mb = size_map.get(rec_quant, 0)
+
+        # gen_tps for recommended quant.
         rec_tps = 0.0
-        for role, info in obs.model_summary.items():
+        for info in obs.model_summary.values():
             if info["model_id"] == mid and rec_quant in info["stats"]:
                 rec_tps = info["stats"][rec_quant].get("gen_tps", 0.0)
                 break
 
-        # Size of recommended quant (so LLM can check RAM).
-        rec_size_mb = 0
-        for role, info in obs.model_summary.items():
-            if info["model_id"] == mid and rec_quant in info["stats"]:
-                rec_size_mb = info["stats"][rec_quant].get("size_mb", 0)
-                break
+        # ── Execution safety ────────────────────────────────────────────────
+        # Post-load headroom = free_mb minus the model's host RAM.
+        # Must be >= EXEC_SAFETY_BUFFER_MB to survive KV cache + spikes.
+        rec_post_load_free = free_mb - rec_size_mb
+        exec_safe          = rec_post_load_free >= EXEC_SAFETY_BUFFER_MB
 
-        # Servable: how many current-queue requests the loaded slot can handle.
+        # Find the largest quant that IS exec-safe (may equal rec_quant).
+        safe_q    = rec_quant
+        safe_size = rec_size_mb
+        if not exec_safe:
+            quality_order = ["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M"]
+            for q in quality_order:
+                if q not in quants_available:
+                    continue
+                sz = size_map.get(q, 0)
+                if (free_mb - sz) >= EXEC_SAFETY_BUFFER_MB:
+                    safe_q    = q
+                    safe_size = sz
+                    break
+
+        fits_ram   = rec_size_mb <= free_mb
+        fits_ram_safe = safe_size <= free_mb
+
+        # Servable with currently loaded slot.
         servable   = 0
         loaded_as  = "not-loaded"
-        loaded_rec = False   # is the recommended quant already loaded?
+        loaded_rec = False
         if mid in loaded:
             key  = loaded[mid]
             slot = obs.loaded_models[key]
@@ -225,18 +284,28 @@ def _per_model_hints(obs: "ModelFlowObservation") -> str:
             best_gain  = net
             best_model = mid
 
-        fits_ram = rec_size_mb <= free_mb
-
         lines.append(
             f"  {mid}:"
             f" loaded={loaded_as}"
             f" servable={servable}"
             f" oldest_age={oldest}steps"
             f" std={std_c} rsn={rsn_c}"
-            f" recommended_quant={rec_quant} (fits_RAM={fits_ram}, size={rec_size_mb}MB, tps={rec_tps:.0f})"
+            f" recommended_quant={rec_quant} (fits_RAM={fits_ram}, size={rec_size_mb}MB,"
+            f" tps={rec_tps:.0f}, exec_safe={exec_safe})"
+            f" safe_quant={safe_q} (size={safe_size}MB, fits_RAM={fits_ram_safe})"
             f" rec_already_loaded={loaded_rec}"
             f" est_net_gain={net}"
         )
+
+        # Explicit warning when recommended and safe quants diverge.
+        if not exec_safe and safe_q != rec_quant:
+            lines.append(
+                f"    ⚠ exec_safe=False for {rec_quant}: post-load headroom only"
+                f" {rec_post_load_free:.0f}MB < {EXEC_SAFETY_BUFFER_MB}MB needed."
+                f" Use safe_quant={safe_q} to avoid RUNTIME OOM."
+                f" Reasoning requests will be served at slightly lower quality — that"
+                f" is better than a failed EXECUTE."
+            )
 
     if best_model:
         lines.append(f"BEST TARGET: {best_model} (est_net_gain={best_gain:.0f})")
@@ -269,7 +338,7 @@ def _loaded_summary(obs: "ModelFlowObservation") -> str:
 
 
 # ---------------------------------------------------------------------------
-# V2 signal summary
+# Signal summary
 # ---------------------------------------------------------------------------
 
 def _signal_summary(obs: "ModelFlowObservation") -> str:
@@ -351,7 +420,24 @@ QUANT SELECTION RULE (critical — this is where most mistakes happen):
   • Queue has ANY reasoning request for a model → use Q6_K (or Q8_0 if Q6_K unavailable)
   • Queue has ONLY standard requests for a model → use Q4_K_M
   • Using Q6_K on standard-only requests wastes RAM and incurs a small penalty
-  • The HINTS block shows recommended_quant — copy it exactly into your JSON
+  • The HINTS block shows recommended_quant — but ALWAYS check exec_safe first (see below)
+
+RUNTIME OOM RECOVERY (check this BEFORE the decision tree if last error was RUNTIME OOM):
+  RUNTIME OOM means the loaded quant's execution footprint exceeds available RAM.
+  Recovery steps:
+    1. EVICT the offending model immediately.
+    2. Look at HINTS → find safe_quant for that model (exec_safe=True).
+    3. LOAD safe_quant instead (usually Q4_K_M). It uses less KV-cache RAM.
+    4. EXECUTE with safe_quant. Reasoning quality drops slightly but execution succeeds.
+  NEVER retry EXECUTE with the same quant after a RUNTIME OOM — it will OOM again.
+
+EXEC SAFETY RULE (prevents RUNTIME OOM before it happens):
+  Before loading any quant, check HINTS → exec_safe field for that model.
+  • exec_safe=True  → recommended_quant is safe to load AND execute.
+  • exec_safe=False → recommended_quant will likely cause RUNTIME OOM.
+                      Use safe_quant from HINTS instead.
+  This matters most on constrained tasks (6200MB RAM) where Q6_K on large models
+  leaves insufficient headroom for execution context and RAM spikes.
 
 DECISION TREE — follow in order every turn:
 
@@ -365,12 +451,15 @@ STEP 2: EXECUTE
   → STOP
 
 STEP 3: Load or replace the right model
-  From HINTS, pick BEST TARGET. Use recommended_quant (exact string from hints).
-  a) Is recommended_quant already loaded? → it would show rec_already_loaded=True → already handled in STEP 1
-  b) fits_RAM=True AND model not loaded → LOAD it with recommended_quant → STOP
-  c) fits_RAM=False OR need to free space → REPLACE:
-       evict_model_id = least-needed loaded model (not needed by any queue request)
-       model_id = BEST TARGET, quant_type = recommended_quant → STOP
+  From HINTS, pick BEST TARGET.
+  Determine which quant to use:
+    a) exec_safe=True  → use recommended_quant
+    b) exec_safe=False → use safe_quant (shown in HINTS)
+  Then:
+    i)  fits_RAM=True AND model not loaded → LOAD with chosen quant → STOP
+    ii) fits_RAM=False OR need to free space → REPLACE:
+          evict_model_id = least-needed loaded model
+          model_id = BEST TARGET, quant_type = chosen quant → STOP
 
 STEP 4: Nothing actionable → IDLE (costs -15, last resort only)
 
@@ -379,6 +468,7 @@ ABSOLUTE CONSTRAINTS:
   • Never EXECUTE a model+quant not in LOADED MODELS — costs -10
   • batch_size ≤ 8 always
   • For REPLACE: always set evict_model_id AND evict_quant_type explicitly
+  • Never retry EXECUTE after RUNTIME OOM with the same quant
 
 Output ONE JSON object, no text before or after:
 {{"command":"LOAD|EXECUTE|EVICT|REPLACE|DEFER|IDLE","model_id":"...","quant_type":"...","batch_size":N,"evict_model_id":null,"evict_quant_type":null}}"""
@@ -398,7 +488,6 @@ def observation_to_text(
 ) -> str:
     sections: List[str] = []
 
-    # Override pre-warning at top — LLM sees it before it reasons.
     if last_was_overridden:
         sections.append(
             f"⚠️  LAST ACTION INVALID — NOT EXECUTED.\n"
@@ -406,7 +495,6 @@ def observation_to_text(
             f"   See LAST ACTION below for reason. Choose a different action."
         )
 
-    # Step header.
     sections.append(
         f"=== STEP {obs.step_count}"
         f" | completed={obs.info.get('completed', 0)}"
@@ -429,8 +517,9 @@ def observation_to_text(
         if recent_bad >= 2:
             bad_cmds = [e.command for e in memory._entries[-2:] if e.band == "bad"]
             sections.append(
-                f"🔁 LOOP: last 2 actions bad ({', '.join(bad_cmds)})."
-                f" Restart from STEP 1 of DECISION TREE."
+                f"🔁 LOOP DETECTED: last 2 actions bad ({', '.join(bad_cmds)})."
+                f" If last error was RUNTIME OOM → follow RUNTIME OOM RECOVERY in system prompt."
+                f" Otherwise restart from STEP 1 of DECISION TREE."
             )
 
     sections.append(_per_model_hints(obs))
@@ -438,13 +527,16 @@ def observation_to_text(
 
     if obs.last_action_feedback:
         status = "ERROR" if obs.last_action_error else "OK"
-        # Show full feedback so agent sees ticks_used/raw and contention.
         sections.append(f"LAST ACTION: {status} — {obs.last_action_feedback[:200]}")
 
     sections.append("\nApply DECISION TREE. Output JSON only:")
 
     return "\n".join(filter(None, sections))
 
+
+# ---------------------------------------------------------------------------
+# Message builder
+# ---------------------------------------------------------------------------
 
 def build_messages(system_prompt: str, obs_text: str) -> List[Dict]:
     return [

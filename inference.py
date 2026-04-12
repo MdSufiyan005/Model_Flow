@@ -13,6 +13,12 @@ Changes in this version
 
 3. All other logic (policy filter, override pre-warning, episode logger,
    retry loop) preserved from previous version.
+
+4. OUTPUT FORMAT FIXES (hackathon compliance):
+   - [START] now includes env=<benchmark> field.
+   - [STEP]  now uses action=<action_str> (was proposed=/final=).
+   - [END]   now includes score=<grader_score> for the completed task.
+             score= is the final grader result for that specific task.
 """
 
 import dataclasses
@@ -32,6 +38,7 @@ from prompt import build_messages, build_roster_str, get_system_prompt, observat
 from server.modelflow_environment import ModelFlowEnvironment
 from config import (
     BASE_BACKOFF_S,
+    BENCHMARK,
     MAX_RETRIES,
     MAX_STEPS_PER_TASK,
     TASKS,
@@ -40,9 +47,10 @@ from config import (
 )
 
 
-# ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Backend config
-# ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+
 USE_GROQ     = os.getenv("GROQ", "0") == "1"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
@@ -69,9 +77,69 @@ else:
 EPISODE_LOG_PATH = Path(os.getenv("EPISODE_LOG_PATH", "episode_log.jsonl"))
 
 
-# ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Output helpers — single source of truth for the three required line types
+# ---------------------------------------------------------------------------
+
+def _log_start(task_name: str) -> None:
+    """
+    [START] task=<task_name> env=<benchmark> model=<model_name>
+    """
+    print(f"[START] task={task_name} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+
+
+def _log_step(
+    step_num:     int,
+    final_action: ModelFlowAction,
+    reward_val:   float,
+    done:         bool,
+    error:        Optional[str],
+) -> None:
+    """
+    [STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+
+    action_str format: COMMAND(model_id,quant_type)
+    e.g. EXECUTE(gemma-3-4b,Q4_K_M)  /  LOAD(llama_1b,Q6_K)  /  IDLE(-,-)
+    """
+    mid   = final_action.model_id   or "-"
+    quant = final_action.quant_type or "-"
+    action_str = f"{final_action.command}({mid},{quant})"
+
+    print(
+        f"[STEP] step={step_num}"
+        f" action={action_str}"
+        f" reward={reward_val:.2f}"
+        f" done={'true' if done else 'false'}"
+        f" error={error or 'null'}",
+        flush=True,
+    )
+
+
+def _log_end(
+    success:     bool,
+    step_num:    int,
+    final_score: float,
+    rewards:     List[float],
+) -> None:
+    """
+    [END] success=<true|false> steps=<n> score=<grader_score> rewards=<r1,r2,...>
+
+    score= is the grader result for the completed task (0.00–1.00).
+    rewards= is the comma-separated per-step reward list, each to 2 dp.
+    """
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
+    print(
+        f"[END] success={'true' if success else 'false'}"
+        f" steps={step_num}"
+        f" score={final_score:.2f}"
+        f" rewards={rewards_str}",
+        flush=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # DecisionMemory
-# ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 def _reward_band(reward: float) -> str:
     if reward > 10:
@@ -83,12 +151,12 @@ def _reward_band(reward: float) -> str:
 
 @dataclasses.dataclass
 class _Entry:
-    step:       int
-    command:    str
-    model_id:   Optional[str]
-    quant_type: Optional[str]
-    band:       str
-    result:     str
+    step:        int
+    command:     str
+    model_id:    Optional[str]
+    quant_type:  Optional[str]
+    band:        str
+    result:      str
     swap_helped: Optional[bool]
 
 
@@ -96,9 +164,8 @@ class DecisionMemory:
     MAX = 5
 
     def __init__(self):
-        self._entries: List[_Entry] = []
-        # Full episode history for logging (never trimmed).
-        self._all_entries: List[_Entry] = []
+        self._entries:     List[_Entry] = []
+        self._all_entries: List[_Entry] = []   # full history, never trimmed
 
     def push(
         self,
@@ -115,8 +182,7 @@ class DecisionMemory:
             prev = self._entries[-1]
             if prev.swap_helped is None and prev.command in ("REPLACE", "EVICT"):
                 updated = dataclasses.replace(prev, swap_helped=(band != "bad"))
-                self._entries[-1] = updated
-                # Update in full history too.
+                self._entries[-1]     = updated
                 if self._all_entries:
                     self._all_entries[-1] = updated
 
@@ -132,9 +198,9 @@ class DecisionMemory:
         return sum(1 for e in self._entries[-3:] if e.band == "bad")
 
 
-# ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Policy filter — only blocks logically impossible actions
-# ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 def _policy_filter(
     raw_action: ModelFlowAction,
@@ -187,9 +253,9 @@ def _print_decision_debug(obs, raw_action, final_action, override_reason):
     print(f"  Last err : {obs.last_action_error or 'None'}", flush=True)
 
 
-# ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Episode logger
-# ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 def _extract_mistakes(memory: DecisionMemory, rewards: List[float]) -> List[str]:
     """
@@ -199,7 +265,6 @@ def _extract_mistakes(memory: DecisionMemory, rewards: List[float]) -> List[str]
     mistakes = []
     seen: set = set()
 
-    # Build step→reward map for O(1) lookup.
     step_to_reward: dict = {}
     for i, e in enumerate(memory._all_entries):
         if i < len(rewards):
@@ -250,8 +315,11 @@ def _write_episode_log(
         for e in bad_entries:
             cmd_counts[e.command] = cmd_counts.get(e.command, 0) + 1
         worst   = max(cmd_counts, key=cmd_counts.get)
-        bad_avg = sum(rewards[i] for i, e in enumerate(memory._all_entries)
-                      if i < len(rewards) and _reward_band(rewards[i]) == "bad") / max(len(bad_entries), 1)
+        bad_avg = (
+            sum(rewards[i] for i, e in enumerate(memory._all_entries)
+                if i < len(rewards) and _reward_band(rewards[i]) == "bad")
+            / max(len(bad_entries), 1)
+        )
         summary = f"Most frequent bad action: {worst} ({cmd_counts[worst]}x), avg_reward={bad_avg:.1f}."
         if quant_note:
             summary += " " + quant_note
@@ -274,24 +342,25 @@ def _write_episode_log(
         print(f"[WARN] Episode log write failed: {exc}", file=sys.stderr, flush=True)
 
 
-# ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Core runner
-# ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 def run_task(task_name: str) -> None:
     env    = ModelFlowEnvironment()
     memory = DecisionMemory()
 
-    obs:        object = None
-    step_num:   int    = 0
-    rewards:    List[float] = []
-    done:       bool   = False
-    final_score: float = 0.0
+    obs:         object       = None
+    step_num:    int          = 0
+    rewards:     List[float]  = []
+    done:        bool         = False
+    final_score: float        = 0.0
 
-    prev_overridden:   bool          = False
+    prev_overridden:    bool          = False
     prev_override_from: Optional[str] = None
 
-    print(f"[START] task={task_name} model={MODEL_NAME}", flush=True)
+    # ── [START] ──────────────────────────────────────────────────────────────
+    _log_start(task_name)
 
     try:
         obs = env.reset(task_name=task_name)
@@ -368,20 +437,15 @@ def run_task(task_name: str) -> None:
 
             if override_reason:
                 prev_overridden    = True
-                prev_override_from = f"{raw_action.command} {raw_action.model_id or ''}/{raw_action.quant_type or ''}"
+                prev_override_from = (
+                    f"{raw_action.command} {raw_action.model_id or ''}/{raw_action.quant_type or ''}"
+                )
             else:
                 prev_overridden    = False
                 prev_override_from = None
 
-            print(
-                f"[STEP] step={step_num}"
-                f" proposed={raw_action.command}/{raw_action.quant_type or '-'}"
-                f" final={final_action.command}/{final_action.quant_type or '-'}"
-                f" reward={reward_val:.2f}"
-                f" done={'true' if done else 'false'}"
-                f" error={obs.last_action_error or 'null'}",
-                flush=True,
-            )
+            # ── [STEP] ───────────────────────────────────────────────────────
+            _log_step(step_num, final_action, reward_val, done, obs.last_action_error)
 
         final_score = env.score_task()
 
@@ -395,13 +459,9 @@ def run_task(task_name: str) -> None:
             and not obs.queue
             and getattr(obs, "deferred_count", 0) == 0
         )
-        rewards_str = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
-        print(
-            f"[END] success={'true' if success else 'false'}"
-            f" steps={step_num} score={final_score:.2f}"
-            f" rewards={rewards_str}",
-            flush=True,
-        )
+
+        # ── [END] ────────────────────────────────────────────────────────────
+        _log_end(success, step_num, final_score, rewards)
 
         _write_episode_log(
             task_name=task_name,
