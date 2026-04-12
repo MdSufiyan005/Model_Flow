@@ -1,8 +1,3 @@
-"""
-inference.py — ModelFlow
-
-"""
-
 import dataclasses
 import json
 import os

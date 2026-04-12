@@ -1,26 +1,3 @@
-"""
-prompt.py
-
-Changes in this version
-------------------------
-1. EXEC_SAFETY_BUFFER_MB (2000 MB) added.
-
-2. _per_model_hints computes exec_safe and safe_quant per model.
-
-3. System prompt STEP 3 and RUNTIME OOM RECOVERY block use these fields.
-
-4. Loop detection tightened (v2.1).
-
-5. FIX — _queue_summary now emits REMAINING: model=count breakdown so the
-   LLM never has to track queue state from memory across steps.
-
-6. FIX — load_past_lessons now filters lessons by current task_name so
-   cross-task noise (e.g. quality-limit "Q6K overuse" polluting ram-pressure
-   which legitimately needs Q6K for reasoning) is eliminated.
-
-7. FIX — observation_to_text passes current_task into load_past_lessons.
-"""
-
 from __future__ import annotations
 import json
 import math

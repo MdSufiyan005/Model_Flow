@@ -1,6 +1,4 @@
 """
-helpers/samplers.py
-
 Stochastic samplers used by the environment.
 """
 

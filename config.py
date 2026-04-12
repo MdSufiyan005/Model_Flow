@@ -1,21 +1,6 @@
-"""
-config.py — shared constants.
-
-"""
-
 import os
 from typing import Dict
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-# ── Re-read the same env vars so helpers can import them without circular deps ──
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct:together")
-HF_TOKEN     = os.getenv("HF_TOKEN")
-
-active_model = MODEL_NAME
 
 BENCHMARK = "modelflow"
 TASKS     = ["single-load", "multi-load", "quality-limit", "ram-pressure"]

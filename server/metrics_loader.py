@@ -1,20 +1,7 @@
 """
-metrics_loader.py
------------------
 Loads the benchmark JSON produced by the profiling repo and normalises it
 into a flat roster dict keyed by "{model_id}-{quant}".
 
-V2 additions
-------------
-- load_var_ms   : load_time_variance_ms from benchmark data
-- load_range_ms : (lo_ms, hi_ms) tuple parsed from "lo-hi" string
-- host_mb_range : (lo_mb, hi_mb) tuple parsed from "lo-hi" string
-- bleu_avg      : BLEU score from quality measurements
-- rouge_l_avg   : ROUGE-L score from quality measurements
-- perplexity    : model perplexity (used for heat sensitivity in future work)
-
-These fields feed _sample_load_time_s, _sample_host_mb, and execute_success
-in rewards.py to ground stochasticity in real measurements.
 """
 
 from __future__ import annotations

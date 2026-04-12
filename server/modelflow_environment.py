@@ -1,12 +1,8 @@
 """
-modelflow_environment.py
-
 Main ModelFlow environment class.
 All core simulation logic, reset/step cycle, observation generation,
-and episode scoring remain here for maximum clarity and single-file
-maintainability of the primary agent-environment contract.
+and episode scoring remain here.
 """
-
 import math
 import os
 import random
