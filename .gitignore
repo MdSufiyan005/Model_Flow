@@ -5,6 +5,8 @@ __pycache__/
 
 episode_log.jsonl
 
+.env.example
+
 # C extensions
 *.so
 validate-submision/
