@@ -20,19 +20,15 @@ class EpisodeResult:
     completion_ages: List[float] = field(default_factory=list)
     throughput_samples: List[float] = field(default_factory=list)
     overprovision_count: int = 0
-    # Number of EXECUTE calls where heat caused a quality failure.
     quality_failures: int = 0
-    # Deferred requests that were eventually served (DEFER was strategic).
     deferred_served: int = 0
-    # Deferred requests that were never served before episode end (wasted defers).
     deferred_abandoned: int = 0
-    # Per-request SLA window at serve time (tracks tightening across episode).
     sla_at_serve: List[int] = field(default_factory=list)
-    # Age of each request at serve time — parallel list to completion_ages.
-    # (completion_ages already exists; sla_at_serve is the threshold at that moment)
 
 
-# Sub-score helpers
+# ---------------------------------------------------------------------------
+# Sub-score helpers  (unchanged from V2)
+# ---------------------------------------------------------------------------
 
 def _latency_score(ages: List[float], sla_windows: List[int] = None) -> float:
     """
@@ -46,7 +42,6 @@ def _latency_score(ages: List[float], sla_windows: List[int] = None) -> float:
         sla_ok = sum(
             1 for age, sla in zip(ages, sla_windows) if age <= sla
         ) / len(ages)
-        # Normalise mean age against the average SLA window seen.
         mean_sla = statistics.mean(sla_windows)
         mean_age = statistics.mean(ages)
         age_score = max(0.0, 1.0 - mean_age / (mean_sla * 2))
@@ -76,7 +71,6 @@ def _overprovision_score(total_executes: int, overprovision_count: int) -> float
 def _quality_accuracy_score(completed: int, quality_failures: int) -> float:
     """
     V2: fraction of executions that did NOT suffer a heat-induced quality failure.
-    1.0 = no failures, 0.0 = every execution degraded.
     """
     if completed == 0:
         return 1.0
@@ -86,9 +80,6 @@ def _quality_accuracy_score(completed: int, quality_failures: int) -> float:
 def _defer_efficiency_score(deferred_served: int, deferred_abandoned: int) -> float:
     """
     V2: measures how effective the agent's DEFER decisions were.
-    1.0 = every deferred request was eventually served.
-    0.0 = every deferred request was abandoned at episode end.
-    Returns 1.0 when no defers were issued (no penalty for not deferring).
     """
     total_deferred = deferred_served + deferred_abandoned
     if total_deferred == 0:
@@ -96,13 +87,63 @@ def _defer_efficiency_score(deferred_served: int, deferred_abandoned: int) -> fl
     return deferred_served / total_deferred
 
 
+# ---------------------------------------------------------------------------
+# OOM safety  — multiplicative ceiling, not an additive term
+#
+# A GPU process OOM is a hard failure: in-flight requests are dropped and
+# the model must be reloaded from scratch.  Treating OOM as one weighted
+# term among many lets other high sub-scores absorb the hit — that is why
+# the old grader gave 0.99 on runs with OOM errors.
+#
+# Instead we apply a score *ceiling* that shrinks with each OOM event.
+# The ceiling halves the remaining headroom above 0.15 per OOM:
+#   0 OOMs → ceiling 1.000  (no cap)
+#   1 OOM  → ceiling 0.618  (~mid-range maximum)
+#   2 OOMs → ceiling 0.407
+#   3 OOMs → ceiling 0.291
+# This makes it structurally impossible for other sub-scores to compensate.
+# ---------------------------------------------------------------------------
+
+def _oom_ceiling(oom_errors: int) -> float:
+    if oom_errors == 0:
+        return 1.0
+    ceiling = 1.0
+    for _ in range(oom_errors):
+        ceiling = 0.15 + (ceiling - 0.15) * 0.55
+    return round(ceiling, 3)
+
+
+# ---------------------------------------------------------------------------
+# Churn score  — used only by grade_ram_pressure
+#
+# Each LOAD + EVICT + REPLACE on a RAM-constrained system costs real
+# wall-clock time (model deserialise + PCIe transfer + KV-cache warmup).
+# Two events is the minimum viable sequence for this task.
+# Each event above 2 costs 0.13 score points.
+#
+# Calibration:
+#   2 events  → 1.00   (perfect memory planning)
+#   4 events  → 0.74   (one extra swap, acceptable)
+#   6 events  → 0.48   (two extra swaps, noticeable cost)
+#   7 events  → 0.35   (meaningful penalty for 7 swaps)
+#   9 events  → 0.09   (excessive churn)
+#   10+ events → 0.00
+# ---------------------------------------------------------------------------
+
+def _churn_score(load_count: int, evict_count: int) -> float:
+    churn = load_count + evict_count
+    return max(0.0, 1.0 - max(0, churn - 2) * 0.13)
+
+
+# ---------------------------------------------------------------------------
 # Individual graders
+# ---------------------------------------------------------------------------
 
 def grade_single_load(result: EpisodeResult) -> float:
     """
     Easy task — stable demand, no drift, no shift.
     Tests: load once, execute to completion, avoid churn.
-    Quality accuracy added but weighted lightly (minimal heat expected).
+    Unchanged from V2.
     """
     completion = result.completed_requests / max(1, result.total_requests)
 
@@ -132,7 +173,7 @@ def grade_multi_load(result: EpisodeResult) -> float:
     """
     Medium task — demand shift at T_shift, load time jitter.
     Tests: detect shift, adapt model choice, manage step count.
-    Defer efficiency added: agent may DEFER requests to wait for the right model.
+    Unchanged from V2.
     """
     completion = result.completed_requests / max(1, result.total_requests)
     total_r    = result.total_reasoning
@@ -168,7 +209,13 @@ def grade_quality_limit(result: EpisodeResult) -> float:
     Hard task — tightening SLA, model heat/drift, DEFER is useful.
     Tests: proactive heat management, quality-aware quant selection,
            strategic deferral, adapting to a shrinking SLA window.
-    Quality accuracy is now a primary signal (0.25 weight).
+
+    V3 change: OOM errors now apply a multiplicative ceiling via
+    _oom_ceiling().  An OOM here means the agent attempted a quant that
+    exceeded the available budget — a memory planning failure.  The
+    per-step reward already fired at -45; the ceiling prevents other
+    high sub-scores from absorbing that signal at the grader level.
+    All weights unchanged from V2.
     """
     completion = result.completed_requests / max(1, result.total_requests)
     total_r    = result.total_reasoning
@@ -191,7 +238,7 @@ def grade_quality_limit(result: EpisodeResult) -> float:
 
     score = (
         0.25 * completion
-      + 0.22 * quality_acc     # primary signal on this task
+      + 0.22 * quality_acc
       + 0.18 * reasoning
       + 0.13 * latency
       + 0.08 * efficiency
@@ -199,42 +246,104 @@ def grade_quality_limit(result: EpisodeResult) -> float:
       + 0.05 * throughput
       + 0.03 * overprov
     )
+
+    # OOM ceiling — consistent with grade_ram_pressure.
+    score = min(score, _oom_ceiling(result.oom_errors))
+
     return _clamp(score)
 
 
 def grade_ram_pressure(result: EpisodeResult) -> float:
     """
     Extreme task — compound: tightening SLA + demand shift + RAM spikes + heat.
-    Tests: OOM avoidance, heat management under tight RAM, strategic DEFER
-           to avoid loading the wrong model when RAM is constrained.
-    Safety (OOM avoidance) and quality accuracy are co-equal primary signals.
+    Tests: OOM avoidance, heat management under tight RAM, strategic DEFER.
+
+    ── Why the old grader gave 0.99 for bad runs ────────────────────────────
+    The old design had `safety = max(0, 1 - oom_errors)` as one additive
+    term (weight 0.22).  On a run with 1 OOM + success=False, that term
+    zeroed out, but the other six terms — all near 1.0 for a run that
+    happened to complete its queue — kept the weighted sum at ~0.78+.
+    The score never actually reflected the operational severity of an OOM.
+
+    ── V3 design principles ─────────────────────────────────────────────────
+
+    1. OOM is a hard score ceiling via _oom_ceiling(), not an additive term.
+       0 OOMs → no cap.  1 OOM → max ~0.62.  2 OOMs → max ~0.41.
+       Structurally impossible for other high sub-scores to compensate.
+
+    2. Queue-not-cleared is a hard multiplier (×0.75).
+       success=False means user-visible failures at the service level.
+       Completing 90% of requests is not a 90%-good operational outcome.
+
+    3. Churn is a PRIMARY weighted term (weight 0.18) via _churn_score().
+       In a real inference cluster each model swap costs wall-clock load
+       time.  _churn_score() maps: 2 events→1.0, 7 events→0.35, 10+→0.0.
+       This is the mechanism that differentiates good from mediocre runs
+       on this task — even a successful run with 7 swaps gets 0.35 on
+       this dimension, pulling the weighted sum down meaningfully.
+
+    4. Step soft multiplier threshold raised from 12→16, decay 4%/step.
+       A clean 14-step run no longer receives a 32% haircut.  The hard
+       task legitimately needs more steps to stay within RAM budget, and
+       taking an extra step to avoid an OOM is the correct tradeoff.
+
+    5. Safety term removed from weighted sum; weight redistributed to
+       churn_score (0.18) and completion (+0.04).
+
+    ── Expected score ranges ────────────────────────────────────────────────
+      Ideal     (8 steps,  2 churn,  0 OOM, success=T):  ~0.95–0.99
+      Good      (10 steps, 4 churn,  0 OOM, success=T):  ~0.88–0.95
+      Acceptable (14 steps, 7 churn, 0 OOM, success=T):  ~0.83–0.90
+      OOM once  (15 steps, 6 churn,  1 OOM, success=F):  ~0.40–0.50
+      OOM twice (15 steps, 7 churn,  2 OOM, success=F):  ~0.28–0.35
+      Pathology (20 steps, 12 churn, 0 OOM, success=T):  ~0.60–0.70
     """
     completion = result.completed_requests / max(1, result.total_requests)
     total_r    = result.total_reasoning
     reasoning  = result.reasoning_completed / max(1, total_r) if total_r > 0 else 1.0
 
-    oom_penalty = min(1.0, result.oom_errors * 1.0)
-    safety      = max(0.0, 1.0 - oom_penalty)
-
     latency     = _latency_score(result.completion_ages, result.sla_at_serve)
     throughput  = _throughput_score(result.throughput_samples)
     quality_acc = _quality_accuracy_score(result.completed_requests, result.quality_failures)
     defer_eff   = _defer_efficiency_score(result.deferred_served, result.deferred_abandoned)
+    churn_sc    = _churn_score(result.load_count, result.evict_count)
 
+    # safety removed as additive term — enforced as hard ceiling below.
     score = (
         0.22 * completion
-      + 0.22 * safety
-      + 0.18 * quality_acc
-      + 0.15 * reasoning
-      + 0.10 * defer_eff
-      + 0.09 * latency
+      + 0.20 * quality_acc
+      + 0.18 * churn_sc      # primary: wall-clock cost of model swaps
+      + 0.16 * reasoning
+      + 0.12 * latency
+      + 0.08 * defer_eff
       + 0.04 * throughput
     )
+
+    # ── Hard ceiling: OOM errors ─────────────────────────────────────────────
+    # One OOM caps the score at ~0.62.  Two cap it at ~0.41.
+    # This is what prevented the old grader from being realistic.
+    score = min(score, _oom_ceiling(result.oom_errors))
+
+    # ── Hard multiplier: queue not cleared ───────────────────────────────────
+    queue_cleared = (
+        result.completed_requests >= result.total_requests
+        and result.deferred_abandoned == 0
+    )
+    if not queue_cleared:
+        score *= 0.75
+
+    # ── Soft multiplier: excessive steps ─────────────────────────────────────
+    # Kicks in at step 17 (was 13).  Decay 4%/step (was 8%).
+    if result.steps_taken > 16:
+        step_factor = max(0.70, 1.0 - (result.steps_taken - 16) * 0.04)
+        score *= step_factor
+
     return _clamp(score)
 
 
-
+# ---------------------------------------------------------------------------
 # Utilities
+# ---------------------------------------------------------------------------
 
 def _clamp(score: float) -> float:
     return round(min(0.99, max(0.01, score)), 2)

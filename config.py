@@ -24,12 +24,12 @@ TASKS     = ["single-load", "multi-load", "quality-limit", "ram-pressure"]
 MAX_STEPS_PER_TASK = 15
 
 TEMPERATURE           = 0.05   # near-deterministic for consistent decisions
-MAX_TOKENS            = 800
+MAX_TOKENS            = 150 #800 -rate limit
 CONTEXT_HISTORY_STEPS = 6
 MAX_RETRIES           = 4
 BASE_BACKOFF_S        = 2.0
 SYSTEM_OVERHEAD_MB    = 1100
-
+EXEC_SAFETY_BUFFER_MB = 2000
 # Never load if free RAM after load would drop below this value.
 # During ram-pressure tasks spikes can reach 2 500 MB — leave room.
 RAM_SAFETY_BUFFER_MB = 1600

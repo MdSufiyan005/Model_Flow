@@ -4,20 +4,21 @@ prompt.py
 Changes in this version
 ------------------------
 1. EXEC_SAFETY_BUFFER_MB (2000 MB) added.
-   After loading a model the remaining free RAM must be >= this value to
-   guarantee execution + worst-case spike won't cause a RUNTIME OOM.
-   quality-limit and ram-pressure tasks have SPIKE_MB_MAX=2500 and only
-   6200 MB total — Q6_K on gemma-3-4b leaves only ~1700 MB post-load,
-   which is below the buffer, causing the EXECUTE → RUNTIME OOM loop.
 
-2. _per_model_hints now computes two new fields per model:
-     exec_safe   — True if post-load headroom >= EXEC_SAFETY_BUFFER_MB
-     safe_quant  — smallest available quant that IS exec-safe
-                   (equals rec_quant when exec_safe=True)
+2. _per_model_hints computes exec_safe and safe_quant per model.
 
-3. System prompt STEP 3 and a new RUNTIME OOM RECOVERY block now use
-   these fields so the agent falls back to Q4_K_M automatically when
-   the recommended quant would cause a runtime OOM.
+3. System prompt STEP 3 and RUNTIME OOM RECOVERY block use these fields.
+
+4. Loop detection tightened (v2.1).
+
+5. FIX — _queue_summary now emits REMAINING: model=count breakdown so the
+   LLM never has to track queue state from memory across steps.
+
+6. FIX — load_past_lessons now filters lessons by current task_name so
+   cross-task noise (e.g. quality-limit "Q6K overuse" polluting ram-pressure
+   which legitimately needs Q6K for reasoning) is eliminated.
+
+7. FIX — observation_to_text passes current_task into load_past_lessons.
 """
 
 from __future__ import annotations
@@ -44,26 +45,36 @@ _COMPLEXITY_MIN_RANK: Dict[str, int] = {"standard": 0, "reasoning": 2}
 EPISODE_LOG_PATH       = Path(os.getenv("EPISODE_LOG_PATH", "episode_log.jsonl"))
 _EPISODE_LESSONS_COUNT = 3
 
-# After loading a model, remaining free RAM must be at least this much so
-# that execution context + KV cache + worst-case spike fits comfortably.
-# quality-limit spikes can reach 2500 MB on 6200 MB hardware, so 2000 MB
-# headroom is the safe floor.
 EXEC_SAFETY_BUFFER_MB = 2000
 
 
 # ---------------------------------------------------------------------------
-# Cross-episode lesson loader
+# Cross-episode lesson loader — FIX: filtered by task_name
 # ---------------------------------------------------------------------------
 
-def load_past_lessons(n: int = _EPISODE_LESSONS_COUNT) -> str:
+def load_past_lessons(n: int = _EPISODE_LESSONS_COUNT, current_task: str = "") -> str:
+    """
+    Load lessons from past episodes, filtered to the current task only.
+    Cross-task lessons caused the agent to apply quality-limit quant rules
+    to ram-pressure (which has different RAM constraints and request mixes).
+    """
     if not EPISODE_LOG_PATH.exists():
         return ""
     try:
         raw     = EPISODE_LOG_PATH.read_text().strip().splitlines()
-        entries = [json.loads(l) for l in raw[-n:] if l.strip()]
+        entries = [json.loads(l) for l in raw if l.strip()]
+
+        # Filter to same task if we have enough entries; fall back to all if not.
+        if current_task:
+            same_task = [e for e in entries if e.get("task", "") == current_task]
+            entries = same_task[-n:] if same_task else entries[-n:]
+        else:
+            entries = entries[-n:]
+
         if not entries:
             return ""
-        lines = ["LESSONS FROM PAST EPISODES (apply before acting):"]
+
+        lines = ["LESSONS FROM PAST EPISODES (same task only — apply before acting):"]
         for e in entries:
             score_str = f"score={e.get('score', '?'):.2f}" if isinstance(e.get("score"), float) else ""
             lines.append(f"  [{e.get('task','?')}] {score_str} steps={e.get('steps','?')}")
@@ -112,20 +123,12 @@ def _memory_block(memory: Optional["DecisionMemory"]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Per-model hints — recommended_quant, exec_safe, safe_quant
+# Per-model hints
 # ---------------------------------------------------------------------------
 
 def _recommended_quant(needs_rsn: bool, quants_available: List[str]) -> str:
-    """
-    Return the single best quant to use for this model given the request mix.
-
-    Rule:
-      - Any reasoning request present → need tier=high → use Q6_K or higher.
-      - Standard only → use Q4_K_M. Never waste Q6_K on std-only.
-    """
     if not quants_available:
         return "Q4_K_M"
-
     if needs_rsn:
         for q in ["Q6_K", "Q8_0"]:
             if q in quants_available:
@@ -137,59 +140,7 @@ def _recommended_quant(needs_rsn: bool, quants_available: List[str]) -> str:
         return sorted(quants_available)[0]
 
 
-def _safe_quant(
-    mid:              str,
-    quants_available: List[str],
-    obs:              "ModelFlowObservation",
-    free_mb:          float,
-) -> tuple:
-    """
-    Find the largest quant whose post-load headroom >= EXEC_SAFETY_BUFFER_MB.
-
-    Returns (safe_quant_str, safe_size_mb, exec_safe_for_rec).
-    exec_safe_for_rec = True when the recommended quant itself is safe.
-    """
-    # Build size map for this model from model_summary.
-    size_map: Dict[str, int] = {}
-    for info in obs.model_summary.values():
-        if info["model_id"] == mid:
-            for q, s in info["stats"].items():
-                size_map[q] = s.get("size_mb", 0)
-
-    # Check quants from highest to lowest quality until one fits.
-    quality_order = ["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M"]
-    chosen_quant   = quants_available[0] if quants_available else "Q4_K_M"
-    chosen_size    = size_map.get(chosen_quant, 0)
-
-    for q in quality_order:
-        if q not in quants_available:
-            continue
-        sz = size_map.get(q, 0)
-        if (free_mb - sz) >= EXEC_SAFETY_BUFFER_MB:
-            chosen_quant = q
-            chosen_size  = sz
-            break
-
-    # Is the recommended quant (Q6_K when reasoning present) itself exec-safe?
-    rec = _recommended_quant(
-        any(True for _ in []),   # placeholder; caller passes rec separately
-        quants_available,
-    )
-    return chosen_quant, chosen_size
-
-
 def _per_model_hints(obs: "ModelFlowObservation") -> str:
-    """
-    Scheduling hints per model with pending requests.
-
-    Key fields:
-      recommended_quant  — best quant for quality (Q6_K if reasoning present)
-      safe_quant         — largest quant guaranteed not to cause RUNTIME OOM
-      exec_safe          — True when recommended_quant == safe_quant
-      servable           — how many requests the currently loaded slot can serve
-      est_net_gain       — rough estimate (actual reward differs by heat/SLA/quality)
-      gen_tps            — generation speed
-    """
     role_to_model = {r: info["model_id"] for r, info in obs.model_summary.items()}
     free_mb = max(
         0,
@@ -225,7 +176,6 @@ def _per_model_hints(obs: "ModelFlowObservation") -> str:
         )
         rec_quant = _recommended_quant(needs_rsn, quants_available)
 
-        # Build size map for this model.
         size_map: Dict[str, int] = {}
         for info in obs.model_summary.values():
             if info["model_id"] == mid:
@@ -234,20 +184,15 @@ def _per_model_hints(obs: "ModelFlowObservation") -> str:
 
         rec_size_mb = size_map.get(rec_quant, 0)
 
-        # gen_tps for recommended quant.
         rec_tps = 0.0
         for info in obs.model_summary.values():
             if info["model_id"] == mid and rec_quant in info["stats"]:
                 rec_tps = info["stats"][rec_quant].get("gen_tps", 0.0)
                 break
 
-        # ── Execution safety ────────────────────────────────────────────────
-        # Post-load headroom = free_mb minus the model's host RAM.
-        # Must be >= EXEC_SAFETY_BUFFER_MB to survive KV cache + spikes.
         rec_post_load_free = free_mb - rec_size_mb
         exec_safe          = rec_post_load_free >= EXEC_SAFETY_BUFFER_MB
 
-        # Find the largest quant that IS exec-safe (may equal rec_quant).
         safe_q    = rec_quant
         safe_size = rec_size_mb
         if not exec_safe:
@@ -261,10 +206,9 @@ def _per_model_hints(obs: "ModelFlowObservation") -> str:
                     safe_size = sz
                     break
 
-        fits_ram   = rec_size_mb <= free_mb
+        fits_ram      = rec_size_mb <= free_mb
         fits_ram_safe = safe_size <= free_mb
 
-        # Servable with currently loaded slot.
         servable   = 0
         loaded_as  = "not-loaded"
         loaded_rec = False
@@ -297,7 +241,6 @@ def _per_model_hints(obs: "ModelFlowObservation") -> str:
             f" est_net_gain={net}"
         )
 
-        # Explicit warning when recommended and safe quants diverge.
         if not exec_safe and safe_q != rec_quant:
             lines.append(
                 f"    ⚠ exec_safe=False for {rec_quant}: post-load headroom only"
@@ -320,7 +263,7 @@ def _per_model_hints(obs: "ModelFlowObservation") -> str:
 
 
 # ---------------------------------------------------------------------------
-# Loaded model summary (with heat and tps)
+# Loaded model summary
 # ---------------------------------------------------------------------------
 
 def _loaded_summary(obs: "ModelFlowObservation") -> str:
@@ -356,13 +299,28 @@ def _signal_summary(obs: "ModelFlowObservation") -> str:
 
 
 # ---------------------------------------------------------------------------
-# Queue summary
+# Queue summary — FIX: added REMAINING breakdown per model
 # ---------------------------------------------------------------------------
 
 def _queue_summary(obs: "ModelFlowObservation", q_stats: Dict) -> str:
     if not obs.queue:
         return "QUEUE: empty"
+
+    role_to_model = {r: info["model_id"] for r, info in obs.model_summary.items()}
+
+    # FIX: explicit per-model remaining count so agent never loses track
+    remaining_by_model: Dict[str, int] = {}
+    for req in obs.queue:
+        mid = role_to_model.get(req.model_type, req.model_type)
+        remaining_by_model[mid] = remaining_by_model.get(mid, 0) + 1
+
     lines = [f"QUEUE: {len(obs.queue)} pending"]
+    lines.append(
+        "REMAINING: "
+        + (", ".join(f"{m}={c}" for m, c in sorted(remaining_by_model.items()))
+           or "none")
+    )
+
     for mid, st in q_stats.items():
         s = st.get("standard", 0)
         r = st.get("reasoning", 0)
@@ -398,7 +356,48 @@ def _ram_line(obs: "ModelFlowObservation") -> str:
 
 
 # ---------------------------------------------------------------------------
-# System prompt
+# Loop detector
+# ---------------------------------------------------------------------------
+
+def _loop_detector(memory: Optional["DecisionMemory"], obs) -> str:
+    if not memory or not memory._entries:
+        return ""
+
+    recent = memory._entries
+
+    if len(recent) >= 1:
+        last = recent[-1]
+        if last.command == "REPLACE" and last.band == "bad":
+            loaded_keys = set(obs.loaded_models.keys())
+            if last.model_id and last.quant_type:
+                target_key = f"{last.model_id}-{last.quant_type}"
+                if target_key in loaded_keys:
+                    return (
+                        f"🔁 REPLACE SELF-LOOP: last REPLACE targeted {target_key}"
+                        f" which is ALREADY LOADED. Do NOT REPLACE again."
+                        f" → EXECUTE {target_key} immediately (batch_size=8)."
+                    )
+            return (
+                f"🔁 BAD REPLACE DETECTED: last REPLACE lost reward."
+                f" Check LOADED MODELS — if target is already loaded, use EXECUTE."
+                f" If target was evicted accidentally, use LOAD (not REPLACE)."
+            )
+
+    recent_bad = sum(1 for e in recent[-2:] if e.band == "bad")
+    if recent_bad >= 2:
+        bad_cmds = [e.command for e in recent[-2:] if e.band == "bad"]
+        return (
+            f"🔁 LOOP DETECTED: last 2 actions bad ({', '.join(bad_cmds)})."
+            f" If last error was RUNTIME OOM → follow RUNTIME OOM RECOVERY in system prompt."
+            f" If last error was 'already loaded' → EXECUTE (not LOAD/REPLACE)."
+            f" Otherwise restart from STEP 1 of DECISION TREE."
+        )
+
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# System prompt — FIX: accepts current_task for lesson filtering
 # ---------------------------------------------------------------------------
 
 def get_system_prompt(
@@ -406,8 +405,9 @@ def get_system_prompt(
     ram_limit_mb: int,
     q_stats: Dict,
     obs: "ModelFlowObservation",
+    current_task: str = "",
 ) -> str:
-    past_lessons  = load_past_lessons()
+    past_lessons  = load_past_lessons(current_task=current_task)
     lessons_block = f"\n{past_lessons}\n" if past_lessons else ""
 
     return f"""You are an expert LLM inference scheduler. Goal: clear the request queue fast while respecting RAM and quality constraints.
@@ -421,6 +421,7 @@ QUANT SELECTION RULE (critical — this is where most mistakes happen):
   • Queue has ONLY standard requests for a model → use Q4_K_M
   • Using Q6_K on standard-only requests wastes RAM and incurs a small penalty
   • The HINTS block shows recommended_quant — but ALWAYS check exec_safe first (see below)
+  • IMPORTANT: check per-model, not globally. One model needing Q6_K does NOT mean all models need Q6_K.
 
 RUNTIME OOM RECOVERY (check this BEFORE the decision tree if last error was RUNTIME OOM):
   RUNTIME OOM means the loaded quant's execution footprint exceeds available RAM.
@@ -436,46 +437,66 @@ EXEC SAFETY RULE (prevents RUNTIME OOM before it happens):
   • exec_safe=True  → recommended_quant is safe to load AND execute.
   • exec_safe=False → recommended_quant will likely cause RUNTIME OOM.
                       Use safe_quant from HINTS instead.
-  This matters most on constrained tasks (6200MB RAM) where Q6_K on large models
-  leaves insufficient headroom for execution context and RAM spikes.
+
+QUEUE ACCOUNTING RULE (prevents no-match EXECUTE loops):
+  The QUEUE block now shows REMAINING: model=count for every model with pending work.
+  Before issuing ANY action, read REMAINING carefully:
+  • If a model shows count=0 or does not appear → it has NO pending requests.
+    Do NOT EXECUTE or REPLACE to load that model — it will waste steps.
+  • Only LOAD/REPLACE/EXECUTE models that appear in REMAINING with count > 0.
+  • After each EXECUTE, mentally subtract the batch served from REMAINING.
+
+ALREADY-LOADED RULE (prevents REPLACE and LOAD self-loops):
+  Before issuing LOAD or REPLACE, always check LOADED MODELS.
+  • If the model+quant you want is already in LOADED MODELS → EXECUTE it directly.
+  • NEVER issue REPLACE where model_id+quant_type matches an already-loaded key.
+  • NEVER issue REPLACE with evict_model_id+evict_quant_type == model_id+quant_type.
 
 DECISION TREE — follow in order every turn:
 
-STEP 1: Look at HINTS → find model where rec_already_loaded=True AND servable > 0
-  → Found: go to STEP 2
-  → Not found: go to STEP 3
+STEP 1: Read REMAINING. Identify which models still have pending requests.
+  → If REMAINING is empty or shows all zeros → queue is done, episode should end.
 
-STEP 2: EXECUTE
-  Use: model from STEP 1, exact quant already loaded, batch_size=min(8, servable)
+STEP 2: Look at HINTS → find model where rec_already_loaded=True AND servable > 0
+  → Found: go to STEP 3
+  → Not found: go to STEP 4
+
+STEP 3: EXECUTE
+  Use: model from STEP 2, exact quant already loaded, batch_size=min(8, servable)
   If SPIKE active: batch_size=min(2, servable)
   → STOP
 
-STEP 3: Load or replace the right model
-  From HINTS, pick BEST TARGET.
+STEP 4: Load or replace the right model
+  From HINTS, pick BEST TARGET (must appear in REMAINING with count > 0).
   Determine which quant to use:
     a) exec_safe=True  → use recommended_quant
     b) exec_safe=False → use safe_quant (shown in HINTS)
   Then:
     i)  fits_RAM=True AND model not loaded → LOAD with chosen quant → STOP
     ii) fits_RAM=False OR need to free space → REPLACE:
-          evict_model_id = least-needed loaded model
+          evict_model_id = model with count=0 in REMAINING (least needed)
           model_id = BEST TARGET, quant_type = chosen quant → STOP
+  ⚠ CRITICAL: before issuing REPLACE, verify model_id+quant_type is NOT in LOADED MODELS.
+              If it is → go to STEP 3 instead.
 
-STEP 4: Nothing actionable → IDLE (costs -15, last resort only)
+STEP 5: Nothing actionable → IDLE (costs -15, last resort only)
 
 ABSOLUTE CONSTRAINTS:
   • Never LOAD a model+quant that appears in LOADED MODELS — costs -5 and wastes a step
   • Never EXECUTE a model+quant not in LOADED MODELS — costs -10
+  • Never EXECUTE a model that has count=0 in REMAINING — wastes steps
   • batch_size ≤ 8 always
   • For REPLACE: always set evict_model_id AND evict_quant_type explicitly
+  • Prefer to evict models whose count=0 in REMAINING (no pending work)
   • Never retry EXECUTE after RUNTIME OOM with the same quant
+  • Never REPLACE a model with itself
 
 Output ONE JSON object, no text before or after:
 {{"command":"LOAD|EXECUTE|EVICT|REPLACE|DEFER|IDLE","model_id":"...","quant_type":"...","batch_size":N,"evict_model_id":null,"evict_quant_type":null}}"""
 
 
 # ---------------------------------------------------------------------------
-# Observation text
+# Observation text — FIX: passes current_task to get_system_prompt
 # ---------------------------------------------------------------------------
 
 def observation_to_text(
@@ -511,16 +532,9 @@ def observation_to_text(
     if mem_block:
         sections.append(mem_block)
 
-    # Loop detector.
-    if memory:
-        recent_bad = sum(1 for e in memory._entries[-2:] if e.band == "bad")
-        if recent_bad >= 2:
-            bad_cmds = [e.command for e in memory._entries[-2:] if e.band == "bad"]
-            sections.append(
-                f"🔁 LOOP DETECTED: last 2 actions bad ({', '.join(bad_cmds)})."
-                f" If last error was RUNTIME OOM → follow RUNTIME OOM RECOVERY in system prompt."
-                f" Otherwise restart from STEP 1 of DECISION TREE."
-            )
+    loop_warning = _loop_detector(memory, obs)
+    if loop_warning:
+        sections.append(loop_warning)
 
     sections.append(_per_model_hints(obs))
     sections.append(_queue_summary(obs, q_stats))

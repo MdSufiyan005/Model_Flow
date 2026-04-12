@@ -19,6 +19,14 @@ Changes in this version
    - [STEP]  now uses action=<action_str> (was proposed=/final=).
    - [END]   now includes score=<grader_score> for the completed task.
              score= is the final grader result for that specific task.
+
+POLICY FILTER FIXES (v2.1):
+   - REPLACE targeting an already-loaded new model is redirected to EXECUTE,
+     preventing the infinite self-replace loop seen in ram-pressure.
+   - EXECUTE with a quant not matching any loaded slot for that model is
+     redirected to EXECUTE with the actually-loaded quant (or IDLE if none).
+   - REPLACE where evict_key == new_key (evicting and reloading the same
+     model+quant) is blocked and redirected to EXECUTE if loaded, else IDLE.
 """
 
 import dataclasses
@@ -199,8 +207,16 @@ class DecisionMemory:
 
 
 # ---------------------------------------------------------------------------
-# Policy filter — only blocks logically impossible actions
+# Policy filter — blocks logically impossible or provably self-defeating actions
 # ---------------------------------------------------------------------------
+
+def _find_loaded_quant_for_model(model_id: str, obs) -> Optional[str]:
+    """Return the quant currently loaded for model_id, or None."""
+    for key, slot in obs.loaded_models.items():
+        if slot.get("model") == model_id:
+            return slot.get("quant")
+    return None
+
 
 def _policy_filter(
     raw_action: ModelFlowAction,
@@ -209,12 +225,20 @@ def _policy_filter(
     """
     Returns (final_action, override_reason_or_None).
 
-    Only intercepts:
-    1. Missing model_id on commands that require it.
-    2. LOAD of an already-loaded key (redirected to EXECUTE).
+    Intercepts:
+    1. Missing model_id on commands that require it → IDLE.
+    2. LOAD of an already-loaded key → redirect to EXECUTE.
+    3. EXECUTE with a quant not matching the loaded slot for that model
+       → redirect to EXECUTE with the actually-loaded quant, or IDLE if
+       the model isn't loaded at all.
+    4. REPLACE where the *new* model+quant is already loaded → redirect
+       to EXECUTE (the evict half is skipped entirely, saving RAM churn).
+    5. REPLACE where evict_key == new_key (self-replace) → redirect to
+       EXECUTE if that key is loaded, else IDLE.
 
-    Everything else goes to the environment for real feedback.
+    Everything else passes through to the environment for real feedback.
     """
+    # ── 1. Missing model_id ─────────────────────────────────────────────────
     if raw_action.command in ("LOAD", "EXECUTE", "REPLACE") and not raw_action.model_id:
         return (
             ModelFlowAction(
@@ -225,6 +249,7 @@ def _policy_filter(
             f"{raw_action.command} missing model_id → IDLE",
         )
 
+    # ── 2. LOAD of already-loaded key → EXECUTE ─────────────────────────────
     if raw_action.command == "LOAD" and raw_action.model_id and raw_action.quant_type:
         key = f"{raw_action.model_id}-{raw_action.quant_type}"
         if key in obs.loaded_models:
@@ -239,6 +264,79 @@ def _policy_filter(
                 ),
                 f"LOAD blocked: {key} already loaded → redirected to EXECUTE",
             )
+
+    # ── 3. EXECUTE with wrong/unloaded quant for that model ─────────────────
+    if raw_action.command == "EXECUTE" and raw_action.model_id and raw_action.quant_type:
+        requested_key = f"{raw_action.model_id}-{raw_action.quant_type}"
+        if requested_key not in obs.loaded_models:
+            # Check if the model is loaded under a different quant.
+            actual_quant = _find_loaded_quant_for_model(raw_action.model_id, obs)
+            if actual_quant is not None:
+                corrected_key = f"{raw_action.model_id}-{actual_quant}"
+                return (
+                    ModelFlowAction(
+                        command="EXECUTE",
+                        model_id=raw_action.model_id,
+                        quant_type=actual_quant,
+                        batch_size=min(8, max(1, raw_action.batch_size or 1)),
+                        evict_model_id=None,
+                        evict_quant_type=None,
+                    ),
+                    (
+                        f"EXECUTE blocked: {requested_key} not loaded"
+                        f" but {corrected_key} is → redirected to EXECUTE with loaded quant"
+                    ),
+                )
+            # Model not loaded at all — let env give the real error (costs -10).
+            # Don't redirect to IDLE; the real penalty teaches the agent.
+            return raw_action, None
+
+    # ── 4. REPLACE where the *new* model+quant is already loaded ────────────
+    if raw_action.command == "REPLACE" and raw_action.model_id and raw_action.quant_type:
+        new_key = f"{raw_action.model_id}-{raw_action.quant_type}"
+        if new_key in obs.loaded_models:
+            # The target is already loaded — just execute it.
+            return (
+                ModelFlowAction(
+                    command="EXECUTE",
+                    model_id=raw_action.model_id,
+                    quant_type=raw_action.quant_type,
+                    batch_size=min(8, max(1, raw_action.batch_size or 1)),
+                    evict_model_id=None,
+                    evict_quant_type=None,
+                ),
+                (
+                    f"REPLACE blocked: {new_key} is already loaded"
+                    f" → redirected to EXECUTE (skipping destructive evict)"
+                ),
+            )
+
+        # ── 5. Self-replace: evict_key == new_key ───────────────────────────
+        if raw_action.evict_model_id and raw_action.evict_quant_type:
+            evict_key = f"{raw_action.evict_model_id}-{raw_action.evict_quant_type}"
+            if evict_key == new_key:
+                # Agent wants to evict and reload the exact same model+quant.
+                if new_key in obs.loaded_models:
+                    return (
+                        ModelFlowAction(
+                            command="EXECUTE",
+                            model_id=raw_action.model_id,
+                            quant_type=raw_action.quant_type,
+                            batch_size=min(8, max(1, raw_action.batch_size or 1)),
+                            evict_model_id=None,
+                            evict_quant_type=None,
+                        ),
+                        f"Self-replace blocked: evict+load of same key {new_key} → EXECUTE",
+                    )
+                else:
+                    return (
+                        ModelFlowAction(
+                            command="IDLE",
+                            model_id=None, quant_type=None, batch_size=1,
+                            evict_model_id=None, evict_quant_type=None,
+                        ),
+                        f"Self-replace blocked: evict+load of same key {new_key} (not loaded) → IDLE",
+                    )
 
     return raw_action, None
 
@@ -474,5 +572,6 @@ def run_task(task_name: str) -> None:
 
 
 if __name__ == "__main__":
-    for task in TASKS:
-        run_task(task)
+    # for task in TASKS:
+    #     run_task(task)
+    run_task('ram-pressure')
