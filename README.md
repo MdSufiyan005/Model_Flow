@@ -16,6 +16,20 @@ pinned: false
 
 (Interactive dashboard for manual exploration and debugging. The environment fully implements the OpenEnv API (step(), reset(), state()), enabling external agents to interact programmatically. The UI does not include a built-in agent.)
 
+---
+ 
+## Table of Contents
+ 
+- [Dashboard](#dashboard)
+- [Quick Setup](#quick-setup)
+  - [Local](#local)
+  - [Docker](#docker)
+- [Project Structure](#project-structure)
+- [Baseline Scores](#baseline-scores-llama-33-70b-via-groq)
+- [Dataset](#dataset)
+- [Detailed Documentation](#detailed-documentation)
+ 
+---
 
 ## Dashboard
 
@@ -98,8 +112,8 @@ Model metrics were profiled on an Intel i3 laptop with 8 GB RAM across 12 model/
 **Source:** [github.com/MdSufiyan005/BenchMarking](https://github.com/MdSufiyan005/BenchMarking)
 
 ---
-
-**For detailed information** (system architecture, request pipeline, RAM accounting, stochastic elements, agent actions, policy filter, quantization tiers, reward structure, full task descriptions & scoring, cross-episode learning, decision tree, tick caps, etc.) please refer to the `docs/` folder:
+## Detailed Documentation
+For detailed information (system architecture, request pipeline, RAM accounting, stochastic elements, agent actions, policy filter, quantization tiers, reward structure, full task descriptions & scoring, cross-episode learning, decision tree, tick caps, etc.) please refer to the `docs/` folder:
 
 - [How It Works – System Architecture, Request Pipeline, RAM Accounting & Stochastic Elements](docs/how-it-works.md)
 - [Agent Actions, Policy Filter & Quantization Tiers](docs/agent-actions.md)
