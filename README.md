@@ -10,7 +10,7 @@ pinned: false
 
 # ModelFlow ⚙️
 
-**ModelFlow** is a reinforcement-learning environment and benchmark for LLM inference scheduling on RAM-constrained systems. At each step the agent observes the current system state - what models are loaded, how much RAM is free, what requests are queued and issues a single scheduling command. The goal is to serve every request in the queue as fast as possible while avoiding out-of-memory errors, quality degradation, and unnecessary model churn.
+**ModelFlow** is a reinforcement-learning environment for LLM inference scheduling on RAM-constrained systems. At each step the agent observes the current system state - what models are loaded, how much RAM is free, what requests are queued and issues a single scheduling command. The goal is to serve every request in the queue as fast as possible while avoiding out-of-memory errors, quality degradation, and unnecessary model churn.
 
 **Live demo:** [huggingface.co/spaces/MdSufiyan005/modelflow](https://huggingface.co/spaces/MdSufiyan005/modelflow)
 
