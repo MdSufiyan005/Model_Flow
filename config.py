@@ -5,8 +5,7 @@ from typing import Dict
 BENCHMARK = "modelflow"
 TASKS     = ["single-load", "multi-load", "quality-limit", "ram-pressure"]
 
-# Keep well under the grader's optimal_cutoff=8 to maximise efficiency score.
-MAX_STEPS_PER_TASK = 15
+MAX_STEPS_PER_TASK = 18
 
 TEMPERATURE           = 0.05   # near-deterministic for consistent decisions
 MAX_TOKENS            = 150 #800 -rate limit
