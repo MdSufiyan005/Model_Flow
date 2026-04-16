@@ -2,7 +2,7 @@ import os
 from typing import Dict
 
 
-BENCHMARK = "modelflow"
+ENVIRONMENT = "modelflow"
 TASKS     = ["single-load", "multi-load", "quality-limit", "ram-pressure"]
 
 MAX_STEPS_PER_TASK = 18

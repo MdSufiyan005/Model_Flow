@@ -15,7 +15,7 @@ from prompt import build_messages, build_roster_str, get_system_prompt, observat
 from server.modelflow_environment import ModelFlowEnvironment
 from config import (
     BASE_BACKOFF_S,
-    BENCHMARK,
+    ENVIRONMENT,
     MAX_RETRIES,
     MAX_STEPS_PER_TASK,
     TASKS,
@@ -28,35 +28,35 @@ from config import (
 # Backend config
 # ---------------------------------------------------------------------------
 
-# USE_GROQ     = os.getenv("GROQ", "0") == "1"
-# GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+USE_GROQ     = os.getenv("GROQ", "0") == "1"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN     = os.getenv("HF_TOKEN")
 
-# if USE_GROQ:
-#     if not GROQ_API_KEY:
-#         raise ValueError("GROQ_API_KEY is required when GROQ=1")
-#     print("[INFO] Using Groq backend", flush=True)
-#     client = OpenAI(
-#         base_url="https://api.groq.com/openai/v1",
-#         api_key=GROQ_API_KEY,
-#         timeout=30.0,
-#     )
-#     if MODEL_NAME == "Qwen/Qwen2.5-72B-Instruct":
-#         MODEL_NAME = "llama-3.3-70b-versatile"
-# else:
-#     if HF_TOKEN is None:
-#         raise ValueError("HF_TOKEN environment variable is required")
-#     print("[INFO] Using HuggingFace router backend", flush=True)
-#     client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN, timeout=30.0)
+if USE_GROQ:
+    if not GROQ_API_KEY:
+        raise ValueError("GROQ_API_KEY is required when GROQ=1")
+    print("[INFO] Using Groq backend", flush=True)
+    client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=GROQ_API_KEY,
+        timeout=30.0,
+    )
+    if MODEL_NAME == "Qwen/Qwen2.5-72B-Instruct":
+        MODEL_NAME = "llama-3.3-70b-versatile"
+else:
+    if HF_TOKEN is None:
+        raise ValueError("HF_TOKEN environment variable is required")
+    print("[INFO] Using HuggingFace router backend", flush=True)
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN, timeout=30.0)
 
-if HF_TOKEN is None:
-    raise ValueError("HF_TOKEN environment variable is required")
-print("[INFO] Using HuggingFace router backend", flush=True)
+# if HF_TOKEN is None:
+#     raise ValueError("HF_TOKEN environment variable is required")
+# print("[INFO] Using HuggingFace router backend", flush=True)
 
-client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN, timeout=30.0)
+# client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN, timeout=30.0)
 
 
 EPISODE_LOG_PATH = Path(os.getenv("EPISODE_LOG_PATH", "episode_log.jsonl"))
@@ -68,9 +68,9 @@ EPISODE_LOG_PATH = Path(os.getenv("EPISODE_LOG_PATH", "episode_log.jsonl"))
 
 def _log_start(task_name: str) -> None:
     """
-    [START] task=<task_name> env=<benchmark> model=<model_name>
+    [START] task=<task_name> env=<environment> model=<model_name>
     """
-    print(f"[START] task={task_name} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+    print(f"[START] task={task_name} env={ENVIRONMENT} model={MODEL_NAME}", flush=True)
 
 
 def _log_step(

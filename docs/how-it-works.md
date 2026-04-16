@@ -1,7 +1,7 @@
 # How It Works
 
 ## System Architecture
-The benchmark consists of three tightly coupled layers:
+The System consists of three tightly coupled layers:
 
 1. Environment (server/modelflow_environment.py) — simulates a single host with 8 000 MB RAM (6 200 MB on hard/extreme tasks). It maintains loaded models, a request queue, a deferred sub-queue, RAM accounting, stochastic RAM spikes, per-model heat state, SLA tightening, and demand-shift injection. Every call to step() advances one logical clock tick and returns a new ModelFlowObservation.
 
